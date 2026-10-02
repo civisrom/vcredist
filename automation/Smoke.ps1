@@ -65,11 +65,16 @@ function New-Probes {
     $sdk = Get-ChildItem "$env:ProgramFiles\dotnet\sdk" -Directory |
         Where-Object Name -Match '^\d+\.\d+\.\d+$' | Sort-Object { [version] $_.Name } -Descending | Select-Object -First 1
     $oldest = $desktop | Where-Object arch -eq 'x64' | Sort-Object { [version] $_.version } | Select-Object -First 1
-    $references = foreach ($framework in @('Microsoft.NETCore.App', 'Microsoft.WindowsDesktop.App')) {
+    $referenceFiles = @{}
+    foreach ($framework in @('Microsoft.NETCore.App', 'Microsoft.WindowsDesktop.App')) {
         Get-ChildItem "$env:ProgramFiles\dotnet\shared\$framework\$($oldest.version)" -Filter '*.dll' | ForEach-Object {
-            try { $null = [Reflection.AssemblyName]::GetAssemblyName($_.FullName); '-r:"' + $_.FullName + '"' }
-            catch [BadImageFormatException] { }
+            $referenceFiles[$_.Name] = $_.FullName
         }
+    }
+    # Desktop supplies the real WindowsBase in place of Core's facade.
+    $references = foreach ($path in $referenceFiles.Values | Sort-Object) {
+        try { $null = [Reflection.AssemblyName]::GetAssemblyName($path); '-r:"' + $path + '"' }
+        catch [BadImageFormatException] { }
     }
     $response = Join-Path $probes 'compile.rsp'
     (@('-noconfig', '-nostdlib+', '-target:exe', ('-out:"' + $probes + '\DesktopProbe.dll"')) +

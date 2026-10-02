@@ -27,8 +27,7 @@ function Get-PayloadPath([string] $Root, [string] $Relative) {
 function Get-InstalledVersion($Engine, $Package) {
     if ($Package.type -eq 'windowsdesktop') { return Get-DesktopVersion $Package }
     $best = $null
-    # The COM StringList wrapper is unreliable across PowerShell versions.
-    # Query related products through the documented Windows Installer API.
+    # The native API provides explicit error codes for malformed MSI metadata.
     if (-not ('RuntimeMsi' -as [type])) {
         Add-Type @'
 using System.Text;
