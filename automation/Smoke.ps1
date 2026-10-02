@@ -19,13 +19,16 @@ $null = New-Item -ItemType Directory $probes -Force
 
 function Invoke-TestProcess([string] $File, [string] $Arguments, [int] $TimeoutSeconds = 600, [switch] $ExpectFailure) {
     Write-Host "RUN: $File $Arguments"
-    $process = Start-Process $File -ArgumentList $Arguments -PassThru
+    $output = Join-Path $work ([guid]::NewGuid().ToString('N') + '-stdout.log')
+    $errorOutput = $output.Replace('-stdout.log', '-stderr.log')
+    $process = Start-Process $File -ArgumentList $Arguments -PassThru -NoNewWindow -RedirectStandardOutput $output -RedirectStandardError $errorOutput
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         Get-Process | Where-Object MainWindowTitle | Select-Object ProcessName, MainWindowTitle | Out-Host
         & taskkill.exe /pid $process.Id /t /f | Out-Host
         throw "Process timed out after ${TimeoutSeconds}s: $File"
     }
     $process.Refresh()
+    Get-Content $output, $errorOutput | Write-Host
     if ($ExpectFailure) {
         if ($process.ExitCode -eq 0) { throw "Invalid input was accepted: $File" }
     } elseif ($process.ExitCode -notin @(0, 3010)) { throw "Exit $($process.ExitCode): $File" }
@@ -136,7 +139,16 @@ try {
     Assert-Applications
     Invoke-TestProcess $exe '/ai /gm2' 900
     Assert-Installed
+    # Force real repairs instead of accepting a successful no-op.
+    $repairDesktop = $desktop | Where-Object arch -eq 'x86' | Sort-Object { [version] $_.version } | Select-Object -First 1
+    $damaged = @(
+        "$env:SystemRoot\SysWOW64\msvcr70.dll",
+        "${env:ProgramFiles(x86)}\dotnet\shared\Microsoft.WindowsDesktop.App\$($repairDesktop.version)\PresentationFramework.dll"
+    )
+    $repairHashes = @{}
+    foreach ($path in $damaged) { $repairHashes[$path] = Get-Sha256 $path; Remove-Item -LiteralPath $path }
     Invoke-TestProcess $exe '/aiF /gm2' 1200
+    foreach ($path in $damaged) { if ((Get-Sha256 $path) -ne $repairHashes[$path]) { throw "Repair did not restore $path" } }
     Assert-Installed
     Assert-Applications
 

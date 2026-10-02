@@ -177,6 +177,7 @@ $manifest = [ordered]@{
     files = $files
 }
 $manifest | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $payload 'manifest.json') -Encoding utf8
+Invoke-Checked 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $payload 'Install.ps1'), '-Mode', 'check')
 $archive = Join-Path $work 'payload.7z'
 Push-Location $payload
 # Match the codecs supported by the bundled upstream SFX module.
