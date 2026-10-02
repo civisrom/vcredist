@@ -45,7 +45,7 @@ function Assert-Installed {
 }
 
 function Get-DesktopBundles($Package) {
-    $pattern = 'Windows Desktop Runtime - ' + [regex]::Escape($Package.version) + ' \(' + $Package.arch + '\)'
+    $pattern = 'Windows Desktop Runtime (?:- )?' + [regex]::Escape($Package.version) + ' \(' + $Package.arch + '\)'
     foreach ($view in @('Registry64', 'Registry32')) {
         $hive = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', $view)
         $uninstall = $hive.OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall')
