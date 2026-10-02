@@ -77,23 +77,27 @@ function Get-MsiProperty([object] $Database, [string] $Name) {
     if ($Name -notmatch '^[A-Za-z]+$') { throw 'Invalid MSI property name' }
     $view = $Database.OpenView("SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$Name'")
     try {
-        $view.Execute()
+        $null = $view.Execute()
         $record = $view.Fetch()
         if (-not $record) { throw "Missing MSI property: $Name" }
-        $record.StringData(1)
-    } finally { $view.Close() }
+        [string] $record.StringData(1)
+    } finally { $null = $view.Close() }
 }
 
 function Get-MsiMetadata([string] $Path) {
     $engine = New-Object -ComObject WindowsInstaller.Installer
     $database = $engine.OpenDatabase($Path, 0)
     try {
-        [ordered]@{
+        $metadata = [ordered]@{
             productCode = Get-MsiProperty $database 'ProductCode'
             upgradeCode = Get-MsiProperty $database 'UpgradeCode'
             version = Get-MsiProperty $database 'ProductVersion'
             name = Get-MsiProperty $database 'ProductName'
         }
+        $null = [guid]::Parse($metadata.productCode)
+        $null = [guid]::Parse($metadata.upgradeCode)
+        $null = [version]::Parse($metadata.version)
+        $metadata
     } finally {
         $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($database)
         $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine)

@@ -154,6 +154,7 @@ foreach ($msi in Get-ChildItem $payload -Recurse -Filter '*.msi' | Sort-Object D
     $relative = $msi.FullName.Substring($payload.Length + 1).Replace('\', '/')
     $parts = $relative.Split('/')
     $metadata = Get-MsiMetadata $msi.FullName
+    Write-Host "MSI $relative`: $($metadata.version), upgrade $($metadata.upgradeCode)"
     $metadata['id'] = $relative.Replace('/', '-').Replace('.msi', '')
     $metadata['type'] = 'msi'
     $metadata['family'] = $parts[0]

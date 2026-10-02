@@ -55,6 +55,17 @@ $temp = [IO.Path]::GetTempPath()
 Assert-Throws { Get-PayloadPath $temp '../outside.exe' } 'path traversal'
 Assert-Throws { Get-PayloadPath $temp ([IO.Path]::GetFullPath($temp)) } 'absolute payload path'
 Assert-Equal (Get-PayloadPath $temp 'payload/file.msi') ([IO.Path]::GetFullPath((Join-Path $temp 'payload/file.msi'))) 'safe payload path'
+# Automation methods can return DBNull rather than PowerShell's null. These
+# return values must not contaminate the single string read from an MSI table.
+$record = New-Object psobject
+$record | Add-Member ScriptMethod StringData { param($index) '8.0.61186' }
+$view = New-Object psobject -Property @{ Record = $record }
+$view | Add-Member ScriptMethod Execute { [DBNull]::Value }
+$view | Add-Member ScriptMethod Close { [DBNull]::Value }
+$view | Add-Member ScriptMethod Fetch { $this.Record }
+$database = New-Object psobject -Property @{ View = $view }
+$database | Add-Member ScriptMethod OpenView { param($query) $this.View }
+Assert-Equal (Get-MsiProperty $database 'ProductVersion') '8.0.61186' 'MSI property must be a scalar string'
 if ([Environment]::OSVersion.Platform -eq 'Win32NT') {
     $engine = New-Object -ComObject WindowsInstaller.Installer
     try {
