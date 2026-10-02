@@ -1,260 +1,120 @@
-# VisualCppRedist AIO
+# Runtimes AIO для Windows 10/11
 
-## Overview:
+Форк [abbodi1406/vcredist](https://github.com/abbodi1406/vcredist), который собирает общий офлайн-установщик библиотек Visual C++, Visual Basic и .NET Windows Desktop Runtime для x86/x64.
 
-- AIO Repack for latest Microsoft Visual C++ Redistributable Runtimes, without the original setup bloat payload.
+Проект использует готовые библиотеки Microsoft. Visual C++ и VSTO перепаковываются в компактные MSI с общим сжатым архивом. Для .NET сохраняются оригинальные подписанные EXE Microsoft: они управляют общими компонентами `dotnet`, восстановлением и удалением. Поэтому размер полного набора в основном определяется пакетами .NET.
 
-- Built upon VBCRedist_AIO_x86_x64.exe by **@ricktendo64**
+## Состав
 
-- The process is handled by a windows command script, which runs hidden in the background by default.
+| Компонент | Что включается |
+| --- | --- |
+| Visual C++ 2005 | 8.0.50727.6229, x86/x64 |
+| Visual C++ 2008 | 9.0.30729.7523, x86/x64 |
+| Visual C++ 2010 | 10.0.40219.473, x86/x64 |
+| Visual C++ 2012 | 11.0.61135.400, x86/x64 |
+| Visual C++ 2013 | 12.0.40664.0, x86/x64 |
+| Visual C++ v14 | Последний выпуск Microsoft для семейства 2015–2026, x86/x64 |
+| Visual Studio 2010 Tools for Office Runtime | Актуальный установщик Microsoft; выбирается архитектура Windows |
+| Старые Visual Basic / Visual C++ | VB Runtime и Visual C++ 2002/2003, x86 |
+| .NET Windows Desktop Runtime | Последний патч каждой стабильной ветки начиная с 6.0, x86/x64 |
 
-- Before installation, the script will check and remove existing non-compliant Visual C++ Runtimes, including the original EXE or MSI setups, or older MSI packages versions.
+Windows Desktop Runtime включает обычный .NET Runtime и библиотеки WPF/WinForms. Ветки 6, 7, 8, 9 и 10 устанавливаются рядом. Новые стабильные ветки добавляются по официальному каталогу Microsoft; preview и RC исключаются. Ветки сохраняются после завершения поддержки, поэтому для .NET 6/7 доступны последние выпущенные патчи, без новых обновлений безопасности. [Политика поддержки Microsoft](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core).
 
-- The uninstallation option/script will remove any detected VC++ runtimes (except UCRT).
+UCRT используется из состава Windows 10/11. Сборка предназначена для x86/x64; ARM64 не включён. Требования отдельных выпусков к версии Windows определяются Microsoft. [Требования .NET](https://learn.microsoft.com/en-us/dotnet/core/install/windows).
 
-- You can extract the installer file with 7-zip or WinRar to a short path, and run Installer.cmd as administrator
+Точные версии, источники, коды MSI и контрольные суммы каждого выпуска находятся в его `manifest.json`. Версия MSI может отличаться от версии DLL в таблице выше.
 
-- By design, Microsoft Windows Installer creates restore point for each msi package, if System Restore is active.
+## Скачать и установить
 
-## Contents:
+Откройте [GitHub Actions → Microsoft Runtimes AIO](https://github.com/civisrom/vcredist/actions/workflows/update.yml) и выберите успешный запуск, в котором есть артефакт `Runtimes_AIO_x86_x64-…`. Он содержит:
 
-<details><summary>Click to expand</summary>
+- `Runtimes_AIO_x86_x64.exe` — полный офлайн-установщик;
+- `manifest.json` — состав и происхождение файлов;
+- `SHA256SUMS` — контрольную сумму EXE.
 
+Для скачивания артефактов Actions потребуется вход в GitHub. Готовые артефакты хранятся 90 дней. Запуск без изменений может завершиться без нового артефакта: используйте ранее собранный пакет с тем же составом. Временные артефакты `unverified-…` предназначены для тестовых машин и удаляются после проверки.
 
-- Visual C++ Redistributables (x86/x64)  
-2005: 8.0.50727.6229  
-2008: 9.0.30729.7523  
-2010: 10.0.40219.473  
-2012: 11.0.61135.400  
-2013: 12.0.40664.0  
-2022: Latest  
-2026: Latest
+Запустите EXE от имени администратора. Интернет на компьютере, где устанавливается пакет, не требуется.
 
-- Visual Studio 2010 Tools for Office Runtime (x86/x64)  
-10.0.60922
+| Параметры EXE | Действие |
+| --- | --- |
+| Без параметров | Установка всего набора с начальным подтверждением |
+| `/y` | Установка без начального подтверждения |
+| `/ai /gm2` | Тихая установка, включая скрытую распаковку |
+| `/ai1 /gm2` | Обновление уже установленных семейств |
+| `/aiF /gm2` | Восстановление установленных и добавление отсутствующих компонентов |
+| `/aiD /gm2` | Проверка файлов и состава без установки |
+| `/?` | Справка |
 
-- Legacy Runtimes (x86)  
-Visual C++ 2002: 7.0.9975.0  
-Visual C++ 2003: 7.10.6119.0  
-Visual Basic Runtimes  
+Более новые установленные версии сохраняются. Перед любым изменением системы проверяются SHA256 всех файлов пакета. Перезагрузка автоматически не выполняется.
 
-- Universal CRT:  
-a complementary part of VC++ 2022 redist.  
-inbox component for Windows 10/11.  
-delivered as an update for Windows Vista/7/8/8.1, either in Monthly Quality Rollup, KB3118401, or KB2999226.  
-installed with VC++ 2019 redist for Windows XP.  
-this repack will install KB3118401 if UCRT is not available.  
-</details>
+Для диагностики и автоматизации распакуйте EXE с помощью 7-Zip и выполните из открытого командного окна:
 
-## Visual C++ 2022/2026 Redistributables:
-
-- VC++ 2026 will only support Windows 10/11 and their Windows Server equivalents.
-
-- VC++ 2022 will be the last v14 for Windows 7/8/8.1 and their Windows Server equivalents.
-
-- Starting v101, the repack will include latest version of each 2022/2026, to be installed on the compatible system.
-
-- VC++ 2022 runtimes are binary compatible with VC++ 2015-2017-2019 and cover all VS 2015-2017-2019-2022 programs.
-
-- VC++ 2026 runtimes are binary compatible and cover all VS 2015-2017-2019-2022-2026 programs.
-
-## Windows Vista Notice:
-
-* VC++ 2022 version 14.32.31332.0 = [VisualCppRedist_AIO v0.61.0](https://github.com/abbodi1406/vcredist/releases/tag/v0.61.0) is the last version compatible with Windows Vista and Server 2008.
-
-## Windows XP Notice:
-
-* VC++ 2019 version 14.28.29213.0 = [VisualCppRedist_AIO v0.35.0](https://github.com/abbodi1406/vcredist/releases/tag/v0.35.0) is the last version compatible with Windows XP (NT 5.1), and Server 2003 / XP x64 (NT 5.2).
-
-Make sure to use the Custom AIO v35 packs for better features and switches.
-
-## INF-based overrides (v104 and later):
-
-- VC++ Redists 2005 ~ 2026 Uninstall entries are unified and simplfied using INF-based uninstaller entry
-
-- These simple INF overrides act as alternative entry for each version/arch of the VC++ runtimes 
-
-- This gives a better listings for the Runtimes, with organized and aligned naming scheme
-
-- For installation, the INF override register itself, and hide the associated Runtimes entries
-
-- For uninstallation, the INF override uninstall the associated Runtimes, and unregister itself
-
-- To restore the old behavior and only show the original Runtimes entries:
-
-run the repack with `/aiN` switch  
-or extract and run `ARP.cmd` and choose **2. Show**
-
-## Credits:
-
-- [@ricktendo64](https://forums.mydigitallife.net/members/28038/) / MDL forums - repacks.net - wincert.net  
-VBCRedist_AIO_x86_x64.exe creator,  modded MSI installers
-
-- [@burfadel](https://forums.mydigitallife.net/members/84828/) / MDL forums - @thatguy91 / guru3D Forums  
-original installation script
-
-- Visual Basic and Visual C++ are registered trademarks of Microsoft Corporation.
-
-## Unattended switches:
-
-- For command-line options and examples, run:  
-`VisualCppRedist_AIO_x86_x64.exe /?`
-
-<details><summary>Click to expand</summary>
-
-
+```bat
+Installer.cmd -Mode check
+Installer.cmd -Quiet
+Installer.cmd -Mode repair -Quiet
 ```
-Usage:  
-VisualCppRedist_AIO_x86_x64.exe [switches]
 
-All switches are optional, case-sensitive.
+`Installer.cmd` возвращает `0` при успехе, `3010` при необходимости перезагрузки и `1` при ошибке. SFX-оболочка не передаёт код завершения вложенного скрипта: для контроля результата автоматического развёртывания используйте распакованный `Installer.cmd` и журналы.
 
-/y  
-Passive mode, shows progress. *All* Runtime packages are installed.
+Журналы сохраняются в `%ProgramData%\civisrom\VisualCppRedist\logs`. Для удаления отдельных компонентов используйте список установленных программ Windows. Общие компоненты .NET, которые нужны другим пакетам или SDK, могут остаться установленными.
 
-/ai  
-Quiet mode, no output shown. *All* Runtime packages are installed.
+## Автоматическое обновление
 
-/aiA  
-Quiet mode. *All* Runtime packages are installed, and hide ARP entries.
+Workflow [update.yml](.github/workflows/update.yml) выполняет проверку первого числа каждого месяца в **06:23 UTC**. GitHub может задерживать запуск расписания. Дополнительно доступны ручной запуск **Run workflow** и сборка после изменения скриптов.
 
-/ai5  
-Quiet mode. *Only* 2005 package is installed.
+Проверяются постоянные ссылки Microsoft для VC++ v14, страница загрузки VSTO и официальный каталог выпусков .NET. Изменение промежуточного патча тоже учитывается. Если проверенный пакет с теми же исходными файлами и скриптами уже существует, повторная сборка пропускается. Параметр **force_build** позволяет собрать его заново.
 
-/ai8  
-Quiet mode. *Only* 2008 package is installed.
+Новый артефакт становится готовым только после прохождения обоих тестовых стендов. При ошибке загрузки, подписи, контрольной суммы или тестов сборка не публикуется как проверенная. Бинарные файлы не добавляются в Git. Используются штатный `GITHUB_TOKEN` и Actions на Node.js 24, закреплённые по SHA.
 
-/aiX  
-Quiet mode. *Only* 2010 package is installed.
+Отдельный шаг поддерживает расписание активным через API GitHub, без фиктивных коммитов.
 
-/ai2  
-Quiet mode. *Only* 2012 package is installed.
+## Источники и старые библиотеки
 
-/ai3  
-Quiet mode. *Only* 2013 package is installed.
+Каталог источников находится в [automation/sources.json](automation/sources.json). Современные VC++, VSTO и .NET загружаются с серверов Microsoft. Для .NET проверяются SHA512 из официальных метаданных и подпись Microsoft; для актуальных VC++ и VSTO — подпись Microsoft. Перед установкой дополнительно проверяются SHA256 файлов готового пакета.
 
-/ai7  
-Quiet mode. *Only* 2022 package is installed.
+Для старых VC++ 2005–2013 и VB/C используется зафиксированный выпуск [abbodi1406 v0.105.0](https://github.com/abbodi1406/vcredist/releases/tag/v0.105.0), проверяемый по SHA256. Для этих компонентов сохраняется проверенный набор upstream: обычные публичные загрузки Microsoft не всегда содержат те же поздние исправления. Автоматическое перепаковывание старых веток из других исходников в этом рецепте не выполняется.
 
-/ai9  
-Quiet mode. *Only* 2026 package is installed for Win 10/11.
+Публичные старые установщики Microsoft также проверяются по контрольным суммам. Если они изменятся, сборка остановится до проверки и обновления рецепта старых пакетов. Изменение одного SHA256 без проверки содержимого не считается обновлением рецепта.
 
-/aiT  
-Quiet mode. *Only* VSTOR 2010 package is installed.
+Собранный EXE является самостоятельным репаком и не подписан сертификатом Microsoft. Подписи оригинальных .NET EXE сохраняются; изменённые MSI Visual C++ не сохраняют исходную подпись контейнера.
 
-/aiE  
-Quiet mode. *Only* Extra VB/C package is installed. 
- 
-/aiB  
-Quiet mode. *Only* Extra VB package is installed.
+## Проверки
 
-/aiC  
-Quiet mode. *Only* Extra VC package is installed.
+На отдельных временных машинах **Windows Server 2022 и 2025** выполняются:
 
-/aiV  
-Quiet mode. *Only* VC++ packages are installed.
+- установка настоящего SFX-установщика, повторная установка и проверка регистрации пакетов;
+- обновление реально установленного предыдущего патча .NET;
+- восстановление намеренно удалённых файлов Visual C++ и Windows Desktop Runtime;
+- запуск приложений WPF/WinForms на каждой ветке .NET, отдельно в x86 и x64, с запрещённым переходом на другой патч;
+- загрузка DLL Visual C++ разных поколений, MFC, OpenMP и старых VB/C-библиотек;
+- удаление и повторная установка каждой .NET-сборки с запуском приложений на остальных ветках после каждого удаления;
+- удаление 20 MSI-компонентов, проверка режима обновления и повторная установка;
+- отказ от установки при повреждении пакета и проверка отсутствия попыток понизить установленные версии.
 
-/aiM  
-Manual Install mode, shows installation script with prompt.
+Образы GitHub содержат Visual Studio и SDK, в том числе распакованные из ZIP. Перед тестами актуальный x64 SDK регистрируется официальным установщиком Microsoft, чтобы у общих компонентов был зарегистрированный владелец. Если Windows Installer сохраняет MSI из-за зависимостей Visual Studio, тест сначала подтверждает причину по журналу, а затем удаляет этот MSI с `IGNOREDEPENDENCIES=ALL` только на одноразовом стенде. Пользовательский установщик этот параметр не использует.
 
-/aiR  
-Auto Uninstall mode, remove all detected runtimes.
+Логика и совместимость скриптов отдельно проверяются в PowerShell 7 и Windows PowerShell 5.1. Разрушающие тесты разрешены скриптом только на одноразовых GitHub-hosted runners. Журналы тестовых машин не загружаются отдельными артефактами.
 
-/aiD  
-Debug mode, create VCpp_debug.log without installing/uninstalling any package.
+Облачные серверные стенды проверяют приложения x86/x64, но не заменяют испытания на клиентских Windows 10/11, на 32-битной Windows, после перезагрузки или с конкретными пользовательскими программами. VSTO x86 включён для 32-битной Windows; на этих стендах проверяется VSTO x64.
 
-/aiP  
-Manual Hide or Show Runtimes entries in Add/Remove Programs panel.
+## Сборка самостоятельно
 
-/aiN  
-Show original Runtimes entries and hide INF override entries.
+Нужны Windows x64, PowerShell 7, 7-Zip, права администратора и доступ в Интернет. Из корня репозитория:
 
-/ai1  
-Update mode. Only already installed packages are updated.
-
-/aiF  
-Repair mode. Only already installed packages are reinstalled or updated.
-
-/gm2  
-Optional switch to disable extraction dialog for all other switches.
-
-/sfxlang:  
-Set the program display language, if possible. Example: /sfxlang:1031
-
-/h | /?  
-Display this help.
+```powershell
+./automation/Test.ps1
+./automation/Build.ps1 -Force
 ```
-```
-Examples:
 
-Automatically install all packages and display progress:  
-VisualCppRedist_AIO_x86_x64.exe /y
+Результат появится в `.build/dist`. Рабочий каталог `.build` перед новой сборкой должен отсутствовать либо укажите новый пустой каталог через `-WorkDirectory`. Скрипт не перезаписывает существующие результаты.
 
-Silently install all packages and display no progress:  
-VisualCppRedist_AIO_x86_x64.exe /ai /gm2
+## Авторы исходного проекта
 
-Silently install 2022/2026 package:  
-VisualCppRedist_AIO_x86_x64.exe /ai9 /gm2
+- [abbodi1406](https://github.com/abbodi1406/vcredist) — исходный репак и инструменты подготовки MSI.
+- [ricktendo64](https://forums.mydigitallife.net/members/28038/) — VBCRedist_AIO и модифицированные MSI.
+- [burfadel](https://forums.mydigitallife.net/members/84828/) — исходный установочный сценарий.
+- Microsoft — библиотеки Visual C++, Visual Basic и .NET; названия продуктов принадлежат Microsoft.
 
-Silently install 2010/2012/2013 and Extra VB/C packages:  
-VisualCppRedist_AIO_x86_x64.exe /aiX23E
-
-Silently install all packages and hide ARP entries:  
-VisualCppRedist_AIO_x86_x64.exe /aiA /gm2
-
-Only update already installed packages:  
-VisualCppRedist_AIO_x86_x64.exe /ai1
-```
-</details>
-
-- **/y** gives the same default behavior, but without the beginning and finish prompts  
-
-- only **/sfxlang** and **/gm2** can be specified separately with other switches
-
-- if other switches are specified separately together, only the last one will have an effect.
-
-Example, this will only install Extra VB/C package:  
-`/ai5 /ai8 /aiT /aiE`
-
-- to install separate packages together, combine their latest switch character after **/ai**
-
-Example:  
-`/ai58X239E`
-
-- you should not combine modes switches, this will cause unforseen errors.
-
-Example for **wrong** usage:  
-`/ai1FMU`
-
-- **/sfxlang** must be the first switch to have effect.
-
-Example:  
-`/sfxlang:1031 /aiV`
-
-- running `/ai9` on Windows 7/8/8.1 will install VC++ 2022 package.
-
-- to force installing stable VC++ 2022 package on Win 10/11:
-
-manually uninstall any VC++ 2026 runtimes
-
-manually uninstall any VC++ 2022 runtimes with version 14.50.xxxxxx or later
-
-run the installer with switch `/ai7`
-
-- switches `/ai7` and `/aiT` have no effect for the Arm64 repack.
-
-## Download
-
-- Latest release zip file:  
-https://kutt.to/vcppredist  
-https://www.tinyplease.com/vcredist
-- Latest release exe file:  
-https://kutt.to/vcpp  
-https://www.tinyplease.com/vcpp
-- All releases:  
-https://gitlab.com/stdout12/vcredist/-/releases  
-https://github.com/abbodi1406/vcredist/releases  
-https://tiny.cc/vcredist
-
----
-[![ko-fi.com](https://img.shields.io/badge/Ko--fi-Buy_Me_a_Coffee-F16000)](https://ko-fi.com/abbodi1406)
+Автоматическая сборка, собственный установочный сценарий и тестовые стенды этого форка находятся в `automation/`, `installer/` и `.github/workflows/`.
