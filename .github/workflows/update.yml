@@ -49,7 +49,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Проверка логики обновления и установщика
-        run: ./automation/Test.ps1
+        run: |
+          ./automation/Test.ps1
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./automation/Test.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell 5.1 tests failed.' }
       - name: Проверка Microsoft и сборка полного набора
         id: build
         env:

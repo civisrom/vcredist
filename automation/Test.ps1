@@ -55,4 +55,11 @@ $temp = [IO.Path]::GetTempPath()
 Assert-Throws { Get-PayloadPath $temp '../outside.exe' } 'path traversal'
 Assert-Throws { Get-PayloadPath $temp ([IO.Path]::GetFullPath($temp)) } 'absolute payload path'
 Assert-Equal (Get-PayloadPath $temp 'payload/file.msi') ([IO.Path]::GetFullPath((Join-Path $temp 'payload/file.msi'))) 'safe payload path'
+if ([Environment]::OSVersion.Platform -eq 'Win32NT') {
+    $engine = New-Object -ComObject WindowsInstaller.Installer
+    try {
+        $absent = [pscustomobject]@{ type = 'msi'; upgradeCode = [guid]::NewGuid().ToString('B'); productCode = [guid]::NewGuid().ToString('B') }
+        Assert-Equal (Get-InstalledVersion $engine $absent) $null 'Empty Windows Installer COM collection'
+    } finally { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine) }
+}
 Write-Host "$checks checks passed."

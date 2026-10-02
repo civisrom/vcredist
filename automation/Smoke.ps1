@@ -104,8 +104,32 @@ function Assert-Applications {
     foreach ($arch in @('x86', 'x64')) { Invoke-Checked (Join-Path $probes "NativeProbe-$arch.exe") @() }
 }
 
+function Install-PreviousPatch {
+    $package = $desktop | Where-Object { $_.arch -eq 'x86' -and -not (Get-DesktopVersion $_) } | Select-Object -First 1
+    if (-not $package) { throw 'No empty x86 .NET branch for the real patch-upgrade test.' }
+    $metadataPath = Join-Path $work 'previous-release.json'
+    $null = Save-Download "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/$($package.channel)/releases.json" $metadataPath -Microsoft
+    $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
+    $previous = $metadata.releases | Where-Object {
+        $_.PSObject.Properties['windowsdesktop'] -and $_.windowsdesktop.version -match '^\d+\.\d+\.\d+$' -and
+        [version] $_.windowsdesktop.version -lt [version] $package.version
+    } | Sort-Object { [version] $_.windowsdesktop.version } -Descending | Select-Object -First 1
+    if (-not $previous) { throw 'No previous stable Desktop patch in Microsoft metadata.' }
+    $file = @($previous.windowsdesktop.files | Where-Object { $_.rid -eq 'win-x86' -and $_.name -eq 'windowsdesktop-runtime-win-x86.exe' })
+    if ($file.Count -ne 1 -or $file[0].hash -notmatch '^[a-fA-F0-9]{128}$') { throw 'Invalid previous .NET release.' }
+    $path = Join-Path $work 'previous-desktop.exe'
+    $null = Save-Download $file[0].url $path -Microsoft
+    if ((Get-FileHash $path -Algorithm SHA512).Hash -ne $file[0].hash) { throw 'Previous patch SHA512 mismatch.' }
+    Assert-MicrosoftSignature $path
+    Invoke-TestProcess $path '/install /quiet /norestart'
+    if ((Get-DesktopVersion $package) -ne [version] $previous.windowsdesktop.version) { throw 'Older patch was not installed.' }
+    Write-Host "PASS: upgrade baseline $($package.id) $($previous.windowsdesktop.version) -> $($package.version)"
+}
+
 try {
+    Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Mode check"
     Invoke-TestProcess $exe '/aiD /gm2' 120
+    Install-PreviousPatch
     Invoke-TestProcess $exe '/ai /gm2' 900
     Assert-Installed
     New-Probes
@@ -155,7 +179,7 @@ try {
         $manifest | ConvertTo-Json -Depth 12 | Set-Content $manifestPath -Encoding utf8
         Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Quiet"
         $latest = Get-ChildItem "$env:ProgramData\civisrom\VisualCppRedist\logs" -Directory | Sort-Object Name -Descending | Select-Object -First 1
-        if (@(Get-ChildItem $latest.FullName -File).Count) { throw 'Downgrade attempted to run a package.' }
+        if (@(Get-ChildItem $latest.FullName -File | Where-Object Name -ne 'installer.log').Count) { throw 'Downgrade attempted to run a package.' }
     } finally { [IO.File]::WriteAllBytes($manifestPath, $originalManifest) }
     $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
     $packages = @($manifest.packages | Where-Object { $_.family -ne 'vstor' -or $_.arch -eq 'x64' })

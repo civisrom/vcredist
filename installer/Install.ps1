@@ -27,7 +27,12 @@ function Get-PayloadPath([string] $Root, [string] $Relative) {
 function Get-InstalledVersion($Engine, $Package) {
     if ($Package.type -eq 'windowsdesktop') { return Get-DesktopVersion $Package }
     $best = $null
-    foreach ($code in @($Engine.RelatedProducts($Package.upgradeCode)) + @($Package.productCode)) {
+    # Enumerate StringList explicitly: PowerShell's array conversion of this COM
+    # collection can throw NullReferenceException, including on an empty list.
+    $related = $Engine.RelatedProducts($Package.upgradeCode)
+    $codes = @($Package.productCode)
+    for ($i = 0; $i -lt $related.Count; $i++) { $codes += $related.Item($i) }
+    foreach ($code in $codes) {
         if ($Engine.ProductState($code) -ne 5) { continue }
         $version = [version] $Engine.ProductInfo($code, 'VersionString')
         if (-not $best -or $version -gt $best) { $best = $version }
@@ -83,7 +88,10 @@ function Invoke-Installation {
     $reboot = $false
     $logDir = Join-Path $env:ProgramData ('civisrom\VisualCppRedist\logs\' + [DateTime]::Now.ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N'))
     try {
-        if ($Mode -ne 'check') { $null = New-Item -ItemType Directory -Path $logDir -Force }
+        if ($Mode -ne 'check') {
+            $null = New-Item -ItemType Directory -Path $logDir -Force
+            $null = Start-Transcript -Path (Join-Path $logDir 'installer.log')
+        }
         foreach ($package in $packages) {
             $installed = Get-InstalledVersion $engine $package
             $exact = if ($package.type -eq 'msi') { $engine.ProductState($package.productCode) -eq 5 } else { $true }
@@ -114,7 +122,10 @@ function Invoke-Installation {
         if ($Mode -ne 'check') { Write-Host "Установка завершена. Журналы: $logDir" }
         if ($reboot) { Write-Host 'Для завершения требуется перезагрузка.'; return 3010 }
         return 0
-    } finally { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine) }
+    } finally {
+        if ($Mode -ne 'check') { $null = Stop-Transcript }
+        $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine)
+    }
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
