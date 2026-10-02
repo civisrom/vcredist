@@ -143,6 +143,9 @@ function Invoke-Installation {
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
+    # A launch from PowerShell 7 can pass its incompatible module path to 5.1.
+    # This installer needs only the modules bundled with the executing shell.
+    $env:PSModulePath = Join-Path $PSHOME 'Modules'
     try { $result = Invoke-Installation; exit $result }
     catch { Write-Error ("$_`n" + $_.ScriptStackTrace) -ErrorAction Continue; exit 1 }
 }
