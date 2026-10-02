@@ -1,0 +1,12 @@
+;!@Install@!UTF-8!
+Title="civisrom Runtimes AIO — Windows 10/11"
+BeginPrompt="Установить библиотеки Visual C++, Visual Basic и .NET Windows Desktop Runtime?"
+RunProgram="Installer.cmd"
+AutoInstall="hidcon:Installer.cmd -Quiet"
+AutoInstall1="hidcon:Installer.cmd -Mode update -Quiet"
+AutoInstallF="hidcon:Installer.cmd -Mode repair -Quiet"
+AutoInstallD="Installer.cmd -Mode check"
+ExtractTitle="Распаковка библиотек"
+ExtractDialogText="Подготовка установочных файлов..."
+HelpText="/y — установить весь набор; /ai /gm2 — тихая установка; /ai1 — обновить установленные; /aiF — восстановить установленные и добавить отсутствующие; /aiD — проверить состав без установки."
+;!@InstallEnd@!

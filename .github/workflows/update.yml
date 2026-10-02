@@ -1,0 +1,66 @@
+name: Microsoft Runtimes AIO
+
+on:
+  schedule:
+    - cron: '23 6 1 * *'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Собрать заново, даже если такой набор уже есть'
+        type: boolean
+        default: false
+  push:
+    branches: [master, 'automation/**']
+    paths: ['automation/**', 'installer/**', 'build_tools/**', '.github/workflows/update.yml']
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: runtimes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  keep-schedule:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Сохранить ежемесячное расписание активным
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow enable update.yml
+
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Проверка логики обновления и установщика
+        run: ./automation/Test.ps1
+      - name: Проверка Microsoft и сборка полного набора
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_BUILD: ${{ inputs.force_build || false }}
+        run: ./automation/Build.ps1 -Force:($env:FORCE_BUILD -eq 'true')
+      - name: Установка и повторная проверка на временной Windows
+        if: steps.build.outputs.changed == 'true'
+        run: ./automation/Smoke.ps1
+      - name: Готовый установщик, состав и SHA256
+        if: steps.build.outputs.changed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.build.outputs.artifact }}
+          path: .build/dist/*
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 90

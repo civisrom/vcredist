@@ -1,2 +1,8 @@
 build_tools/_vbc/VBCRun.7z export-ignore
 .gitattributes export-ignore
+installer/*.cmd text eol=crlf
+installer/*.ps1 text eol=crlf
+installer/7zSfxConfig.txt text eol=crlf
+automation/*.ps1 text eol=lf
+automation/*.json text eol=lf
+.github/workflows/*.yml text eol=lf

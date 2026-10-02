@@ -1,0 +1,97 @@
+{
+  "schema": 1,
+  "baseline": {
+    "url": "https://github.com/abbodi1406/vcredist/releases/download/v0.105.0/VisualCppRedist_AIO_x86_x64.exe",
+    "sha256": "6045a79e7120f67ab7ba33e7783a2ee07950fcdb2906d6facf06ddc514b8a529"
+  },
+  "wix": {
+    "url": "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip",
+    "sha256": "6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31"
+  },
+  "current": [
+    {
+      "id": "vc14-x86",
+      "url": "https://aka.ms/vc14/vc_redist.x86.exe",
+      "minimumVersion": "14.51.36247.0"
+    },
+    {
+      "id": "vc14-x64",
+      "url": "https://aka.ms/vc14/vc_redist.x64.exe",
+      "minimumVersion": "14.51.36247.0"
+    },
+    {
+      "id": "vstor",
+      "page": "https://go.microsoft.com/fwlink/?LinkId=140384",
+      "file": "vstor_redist.exe",
+      "minimumVersion": "10.0.60917.0"
+    }
+  ],
+  "legacyMonitors": [
+    {
+      "id": "vc2005-x86",
+      "page": "https://www.microsoft.com/en-us/download/details.aspx?id=26347",
+      "file": "vcredist_x86.exe",
+      "sha256": "8648c5fc29c44b9112fe52f9a33f80e7fc42d10f3b5b42b2121542a13e44adfd"
+    },
+    {
+      "id": "vc2005-x64",
+      "page": "https://www.microsoft.com/en-us/download/details.aspx?id=26347",
+      "file": "vcredist_x64.exe",
+      "sha256": "4487570bd86e2e1aac29db2a1d0a91eb63361fcaac570808eb327cd4e0e2240d"
+    },
+    {
+      "id": "vc2008-x86",
+      "page": "https://www.microsoft.com/en-us/download/details.aspx?id=26368",
+      "file": "vcredist_x86.exe",
+      "sha256": "8742bcbf24ef328a72d2a27b693cc7071e38d3bb4b9b44dec42aa3d2c8d61d92"
+    },
+    {
+      "id": "vc2008-x64",
+      "page": "https://www.microsoft.com/en-us/download/details.aspx?id=26368",
+      "file": "vcredist_x64.exe",
+      "sha256": "c5e273a4a16ab4d5471e91c7477719a2f45ddadb76c7f98a38fa5074a6838654"
+    },
+    {
+      "id": "vc2010-x86",
+      "url": "https://download.microsoft.com/download/E/E/0/EE05C9EF-A661-4D9E-BCE2-6961ECDF087F/vcredist_x86.exe",
+      "sha256": "1df24320ae1b974a42fc37f852d962c0e2f0e62bb339585fc862bb15d5a5d216"
+    },
+    {
+      "id": "vc2013-x86",
+      "url": "https://aka.ms/highdpimfc2013x86enu",
+      "sha256": "53b605d1100ab0a88b867447bbf9274b5938125024ba01f5105a9e178a3dcdbd"
+    },
+    {
+      "id": "vc2010-x64",
+      "url": "https://download.microsoft.com/download/E/E/0/EE05C9EF-A661-4D9E-BCE2-6961ECDF087F/vcredist_x64.exe",
+      "sha256": "7ba40e8c2dbcec6d0b83b94e719ea9291c2ebc4fd9d4f34dce6f852739841ed7"
+    },
+    {
+      "id": "vc2013-x64",
+      "url": "https://aka.ms/highdpimfc2013x64enu",
+      "sha256": "a4bba7701e355ae29c403431f871a537897c363e215cafe706615e270984f17c"
+    },
+    {
+      "id": "vc2012-uwp",
+      "page": "https://www.microsoft.com/en-us/download/details.aspx?id=53340",
+      "file": "vc_uwpdesktop.110.exe",
+      "sha256": "97653af4ffbd9ce42317a0b84d5b2b58945b0ac18c2ea1d014448f1f94f40bfe"
+    },
+    {
+      "id": "vb6-extended",
+      "page": "https://www.microsoft.com/en-us/download/details.aspx?id=50722",
+      "file": "VB60SP6-KB3096896-x86-ENU.msi",
+      "sha256": "917b65a22b60bddeae603f5692436f727d4f1213d72a6f801706ba5480a36661"
+    }
+  ],
+  "legacyVersions": {
+    "2005": "8.0.50727.6229",
+    "2008": "9.0.30729.7523",
+    "2010": "10.0.40219.473",
+    "2012": "11.0.61135.400",
+    "2013": "12.0.40664.0",
+    "VC2002": "7.0.9975.0",
+    "VC2003": "7.10.6119.0",
+    "VB": "upstream-v0.105.0"
+  }
+}
