@@ -36,12 +36,16 @@ jobs:
 
   build:
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 40
+    outputs:
+      changed: ${{ steps.build.outputs.changed }}
+      artifact: ${{ steps.build.outputs.artifact }}
+      candidate_id: ${{ steps.candidate.outputs.artifact-id }}
     defaults:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
         with:
           persist-credentials: false
       - name: Проверка логики обновления и установщика
@@ -52,15 +56,70 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           FORCE_BUILD: ${{ inputs.force_build || false }}
         run: ./automation/Build.ps1 -Force:($env:FORCE_BUILD -eq 'true')
-      - name: Установка и повторная проверка на временной Windows
+      - name: Временный пакет для тестовых машин
         if: steps.build.outputs.changed == 'true'
-        run: ./automation/Smoke.ps1
-      - name: Готовый установщик, состав и SHA256
-        if: steps.build.outputs.changed == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        id: candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
         with:
-          name: ${{ steps.build.outputs.artifact }}
+          name: unverified-${{ github.run_id }}-${{ github.run_attempt }}
           path: .build/dist/*
           compression-level: 0
           if-no-files-found: error
+          retention-days: 1
+
+  lifecycle:
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1, Node 24
+        with:
+          name: unverified-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .build/dist
+      - name: Установка, восстановление, удаление и запуск приложений x86/x64
+        run: ./automation/Smoke.ps1
+      - name: Диагностика ошибки установки
+        if: failure()
+        run: ./automation/Diagnostics.ps1
+
+  verified:
+    needs: [build, lifecycle]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1, Node 24
+        with:
+          name: unverified-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist
+      - name: Готовый установщик после прохождения всех стендов
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist/*
+          compression-level: 0
+          if-no-files-found: error
           retention-days: 90
+
+  cleanup:
+    needs: [build, lifecycle, verified]
+    if: always() && needs.build.outputs.candidate_id != ''
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Удалить временный непроверенный пакет
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_ID: ${{ needs.build.outputs.candidate_id }}
+        run: gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$ARTIFACT_ID"

@@ -179,7 +179,8 @@ $manifest = [ordered]@{
 $manifest | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $payload 'manifest.json') -Encoding utf8
 $archive = Join-Path $work 'payload.7z'
 Push-Location $payload
-try { Invoke-Checked $sevenZip @('a', $archive, '.', '-t7z', '-m0=LZMA2', '-mx=9', '-ms=on', '-mmt=2', '-bso0') }
+# Match the codecs supported by the bundled upstream SFX module.
+try { Invoke-Checked $sevenZip @('a', $archive, '.', '-t7z', '-mqs', '-mx=9', '-m0=BCJ2', '-m1=LZMA:d26', '-m2=LZMA:d19', '-m3=LZMA:d19', '-mb0:1', '-mb0s1:2', '-mb0s2:3', '-ms=on', '-mmt=2', '-bso0') }
 finally { Pop-Location }
 $exe = Join-Path $dist 'Runtimes_AIO_x86_x64.exe'
 $output = [IO.File]::Create($exe)

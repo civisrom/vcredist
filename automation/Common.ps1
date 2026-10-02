@@ -99,9 +99,3 @@ function Get-MsiMetadata([string] $Path) {
         $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine)
     }
 }
-
-function Set-InfValue([string] $Text, [string] $Name, [string] $Value) {
-    $pattern = '(?m)^' + [regex]::Escape($Name) + '[ \t]*=[^\r\n]*'
-    if ([regex]::Matches($Text, $pattern).Count -ne 1) { throw "Expected one INF value: $Name" }
-    [regex]::Replace($Text, $pattern, [Text.RegularExpressions.MatchEvaluator] { param($m) "$Name =`"$Value`"" })
-}
