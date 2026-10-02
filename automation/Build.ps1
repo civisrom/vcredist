@@ -16,13 +16,13 @@ $catalog = Get-Content "$PSScriptRoot/sources.json" -Raw | ConvertFrom-Json -AsH
 $sources = [Collections.Generic.List[object]]::new()
 
 function Receive-Source($Source, [switch] $Legacy) {
-    $url = $Source.url
-    if ($Source.page) {
+    $url = $Source['url']
+    if ($Source['page']) {
         $page = Join-Path $downloads ($Source.id + '.html')
         $null = Save-Download $Source.page $page -Microsoft
         $url = Get-DownloadLink (Get-Content $page -Raw) $Source.file
     }
-    $extension = if ($Source.file -like '*.msi') { '.msi' } else { '.exe' }
+    $extension = if ($Source['file'] -like '*.msi') { '.msi' } else { '.exe' }
     $path = Join-Path $downloads ($Source.id + $extension)
     $resolved = Save-Download $url $path -Microsoft
     $hash = Get-Sha256 $path
@@ -34,7 +34,7 @@ function Receive-Source($Source, [switch] $Legacy) {
         Assert-MicrosoftSignature $path
     }
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($path).FileVersion
-    if ($Source.minimumVersion) {
+    if ($Source['minimumVersion']) {
         if ($version -notmatch '\d+\.\d+\.\d+(?:\.\d+)?') { throw "No file version: $path" }
         $version = $Matches[0]
         if ([version] $version -lt [version] $Source.minimumVersion) { throw "Microsoft returned an older package: $($Source.id) $version" }
