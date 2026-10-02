@@ -27,11 +27,26 @@ function Get-PayloadPath([string] $Root, [string] $Relative) {
 function Get-InstalledVersion($Engine, $Package) {
     if ($Package.type -eq 'windowsdesktop') { return Get-DesktopVersion $Package }
     $best = $null
-    # Enumerate StringList explicitly: PowerShell's array conversion of this COM
-    # collection can throw NullReferenceException, including on an empty list.
-    $related = $Engine.RelatedProducts($Package.upgradeCode)
+    # The COM StringList wrapper is unreliable across PowerShell versions.
+    # Query related products through the documented Windows Installer API.
+    if (-not ('RuntimeMsi' -as [type])) {
+        Add-Type @'
+using System.Text;
+using System.Runtime.InteropServices;
+public static class RuntimeMsi {
+    [DllImport("msi.dll", CharSet = CharSet.Unicode)]
+    public static extern uint MsiEnumRelatedProducts(string code, uint reserved, uint index, StringBuilder product);
+}
+'@
+    }
     $codes = @($Package.productCode)
-    for ($i = 0; $i -lt $related.Count; $i++) { $codes += $related.Item($i) }
+    for ([uint32] $i = 0; ; $i++) {
+        $buffer = [Text.StringBuilder]::new(39)
+        $status = [RuntimeMsi]::MsiEnumRelatedProducts($Package.upgradeCode, 0, $i, $buffer)
+        if ($status -eq 259) { break }
+        if ($status -ne 0) { throw "MsiEnumRelatedProducts $($Package.id): $status" }
+        $codes += $buffer.ToString()
+    }
     foreach ($code in $codes) {
         if ($Engine.ProductState($code) -ne 5) { continue }
         $version = [version] $Engine.ProductInfo($code, 'VersionString')
@@ -130,5 +145,5 @@ function Invoke-Installation {
 
 if ($MyInvocation.InvocationName -ne '.') {
     try { $result = Invoke-Installation; exit $result }
-    catch { Write-Error $_ -ErrorAction Continue; exit 1 }
+    catch { Write-Error ("$_`n" + $_.ScriptStackTrace) -ErrorAction Continue; exit 1 }
 }
