@@ -59,6 +59,30 @@ function Get-DesktopBundles($Package) {
     }
 }
 
+function Register-TestSdk {
+    # runner-images installs SDK ZIPs over the machine-wide .NET directory.
+    # Register the latest SDK with its official installer so shared components
+    # have a real owner during the Desktop uninstall/coexistence tests.
+    $package = $desktop | Where-Object arch -eq 'x64' | Sort-Object { [version] $_.version } -Descending | Select-Object -First 1
+    $metadataPath = Join-Path $work 'sdk-release.json'
+    $null = Save-Download "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/$($package.channel)/releases.json" $metadataPath -Microsoft
+    $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
+    $release = @($metadata.releases | Where-Object {
+        $_.PSObject.Properties['windowsdesktop'] -and $_.windowsdesktop.version -eq $package.version
+    })
+    if ($release.Count -ne 1) { throw 'Ambiguous SDK test baseline.' }
+    $sdk = $release[0].sdk
+    $file = @($sdk.files | Where-Object { $_.rid -eq 'win-x64' -and $_.name -eq 'dotnet-sdk-win-x64.exe' })
+    if ($file.Count -ne 1 -or $file[0].hash -notmatch '^[a-fA-F0-9]{128}$') { throw 'Invalid SDK test baseline.' }
+    $path = Join-Path $work 'baseline-sdk.exe'
+    $null = Save-Download $file[0].url $path -Microsoft
+    if ((Get-FileHash $path -Algorithm SHA512).Hash -ne $file[0].hash) { throw 'SDK SHA512 mismatch.' }
+    Assert-MicrosoftSignature $path
+    Invoke-TestProcess $path "/install /quiet /norestart /log `"$work\baseline-sdk.log`"" 900
+    Invoke-Checked "$env:ProgramFiles\dotnet\dotnet.exe" @('--list-sdks')
+    Write-Host "PASS: registered SDK $($sdk.version) for shared-component ownership tests"
+}
+
 function New-Probes {
     # Compile against the oldest runtime; explicitly select each branch at runtime.
     $dotnet = "$env:ProgramFiles\dotnet\dotnet.exe"
@@ -136,6 +160,7 @@ function Install-PreviousPatch {
 }
 
 try {
+    Register-TestSdk
     Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Mode check"
     Invoke-TestProcess $exe '/aiD /gm2' 120
     Install-PreviousPatch
@@ -164,7 +189,7 @@ try {
         $path = Get-PayloadPath $payload $package.path
         if (-not @(Get-DesktopBundles $package).Count) { Invoke-TestProcess $path '/install /quiet /norestart' }
         if (@(Get-DesktopBundles $package).Count -ne 1) { throw "Expected one registered bundle: $($package.id)" }
-        Invoke-TestProcess $path '/uninstall /quiet /norestart'
+        Invoke-TestProcess $path "/uninstall /quiet /norestart /log `"$work\remove-$($package.id).log`""
         if (@(Get-DesktopBundles $package).Count) { throw "Bundle was not removed: $($package.id)" }
         Write-Host "PASS: bundle removed $($package.id); remaining shared runtime: $(Get-DesktopVersion $package)"
         foreach ($other in $desktop | Where-Object id -ne $package.id) { Invoke-DesktopProbe $other }
@@ -178,6 +203,13 @@ try {
         $package = $msis[$i]
         if ($engine.ProductState($package.productCode) -ne 5) { throw "MSI lifecycle not covered: $($package.id)" }
         Invoke-TestProcess 'msiexec.exe' "/x $($package.productCode) /qn /norestart /L*v `"$work\remove-$($package.id).log`""
+        if ($engine.ProductState($package.productCode) -eq 5) {
+            $log = Get-Content "$work\remove-$($package.id).log" -Raw
+            if ($log -notmatch 'Found dependent "') { throw "Unexpected MSI retention: $($package.id)" }
+            Write-Host "PASS: Windows Installer preserved $($package.id) for registered dependents"
+            # Only on this disposable runner: also exercise actual MSI removal.
+            Invoke-TestProcess 'msiexec.exe' "/x $($package.productCode) /qn /norestart IGNOREDEPENDENCIES=ALL /L*v `"$work\remove-forced-$($package.id).log`""
+        }
         if ($engine.ProductState($package.productCode) -eq 5) { throw "MSI removal failed: $($package.id)" }
         $removed += $package
         Write-Host "PASS: MSI removed $($package.id)"
