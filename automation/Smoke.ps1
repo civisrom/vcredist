@@ -77,9 +77,9 @@ function New-Probes {
         catch [BadImageFormatException] { }
     }
     $response = Join-Path $probes 'compile.rsp'
-    (@('-noconfig', '-nostdlib+', '-target:exe', ('-out:"' + $probes + '\DesktopProbe.dll"')) +
+    (@('-nostdlib+', '-target:exe', ('-out:"' + $probes + '\DesktopProbe.dll"')) +
         @($references) + @('"' + $PSScriptRoot + '\probes\DesktopProbe.cs"')) | Set-Content $response
-    Invoke-Checked $dotnet @((Join-Path $sdk.FullName 'Roslyn/bincore/csc.dll'), "@$response")
+    Invoke-Checked $dotnet @((Join-Path $sdk.FullName 'Roslyn/bincore/csc.dll'), '-noconfig', "@$response")
     foreach ($package in $desktop) {
         @{ runtimeOptions = @{ tfm = "net$($package.channel)"; rollForward = 'Disable'; frameworks = @(
             @{ name = 'Microsoft.NETCore.App'; version = $package.version },
@@ -96,7 +96,8 @@ function New-Probes {
   <dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.VC90.CRT" version="9.0.30729.7523" processorArchitecture="$processor" publicKeyToken="1fc8b3b9a1e18e3b"/></dependentAssembly></dependency>
 </assembly>
 "@ | Set-Content $appManifest
-        Invoke-Checked "$env:SystemRoot\Microsoft.NET\Framework\v4.0.30319\csc.exe" @('/nologo', '/target:exe', "/platform:$arch", "/win32manifest:$appManifest", "/out:$probes\NativeProbe-$arch.exe", "$PSScriptRoot/probes/NativeProbe.cs")
+        $nativeSource = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'probes/NativeProbe.cs'))
+        Invoke-Checked "$env:SystemRoot\Microsoft.NET\Framework\v4.0.30319\csc.exe" @('/nologo', '/target:exe', "/platform:$arch", "/win32manifest:$appManifest", "/out:$probes\NativeProbe-$arch.exe", $nativeSource)
     }
 }
 
