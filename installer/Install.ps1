@@ -255,6 +255,7 @@ function Invoke-Installation {
             Set-InstallationProgress $progress "$operationText — компонент $($completed + 1) из $($selected.Count)" "$($package.name)`r`nАрхитектура: $($package.arch). Версия: $($package.version).`r`nДождитесь завершения обработки компонента." $completed $selected.Count
             $path = Get-PayloadPath $PSScriptRoot $package.path
             $log = Join-Path $logDir ($package.id + '.log')
+            $installSteps = @()
             if ($package.type -eq 'msi') {
                 $executable = "$env:SystemRoot\System32\msiexec.exe"
                 $arguments = "/i `"$path`" /qn /norestart /L*v `"$log`""
@@ -263,22 +264,32 @@ function Invoke-Installation {
                 if ($exact) {
                     $arguments += ' REINSTALL=ALL REINSTALLMODE=vomus'
                     $patches = @(Get-SupersededMsiPatches $engine $package)
-                    if ($patches.Count) { $arguments += ' MSIPATCHREMOVE="' + ($patches -join ';') + '"' }
+                    if ($patches.Count) {
+                        # Patch removal restores its baseline cache, even when a
+                        # newer MSI is supplied. Complete it before the upgrade.
+                        $patchLog = Join-Path $logDir ($package.id + '-remove-patch.log')
+                        $installSteps += @{ log = $patchLog; arguments = "/i $($package.productCode) /qn /norestart /L*v `"$patchLog`" MSIPATCHREMOVE=`"$($patches -join ';')`"" }
+                    }
                 }
             } else {
                 $executable = $path
                 $operation = if ($action -eq 'repair') { '/repair' } else { '/install' }
                 $arguments = "$operation /quiet /norestart /log `"$log`""
             }
+            $installSteps += @{ log = $log; arguments = $arguments }
             $currentResult.after = ''
-            if ($interactive) {
-                $process = Start-Process -FilePath $executable -ArgumentList $arguments -PassThru
-                while (-not $process.WaitForExit(100)) { [Windows.Forms.Application]::DoEvents() }
-                $process.Refresh()
-            } else { $process = Start-Process -FilePath $executable -ArgumentList $arguments -Wait -PassThru }
-            $currentResult.exitCode = $process.ExitCode
-            if ($process.ExitCode -notin @(0, 3010)) { throw "Ошибка установки $($package.id): $($process.ExitCode). Журнал: $log" }
-            if ($process.ExitCode -eq 3010) { $reboot = $true }
+            $currentResult.exitCode = 0
+            foreach ($step in $installSteps) {
+                $log = $step.log
+                if ($interactive) {
+                    $process = Start-Process -FilePath $executable -ArgumentList $step.arguments -PassThru
+                    while (-not $process.WaitForExit(100)) { [Windows.Forms.Application]::DoEvents() }
+                    $process.Refresh()
+                } else { $process = Start-Process -FilePath $executable -ArgumentList $step.arguments -Wait -PassThru }
+                if ($process.ExitCode -ne 0) { $currentResult.exitCode = $process.ExitCode }
+                if ($process.ExitCode -notin @(0, 3010)) { throw "Ошибка установки $($package.id): $($process.ExitCode). Журнал: $log" }
+                if ($process.ExitCode -eq 3010) { $reboot = $true }
+            }
             $actual = Get-InstalledVersion $engine $package
             Complete-InstallationResult $currentResult $actual $installed $action $log
             $completed++
