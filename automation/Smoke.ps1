@@ -1,6 +1,20 @@
-param([string] $WorkDirectory = (Join-Path (Split-Path $PSScriptRoot) '.build'))
+param(
+    [string] $WorkDirectory = (Join-Path (Split-Path $PSScriptRoot) '.build'),
+    [ValidateSet('windows-10', 'windows-11')]
+    [string] $ClientWindows
+)
 . "$PSScriptRoot/Common.ps1"
-if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
+if ($ClientWindows) {
+    if ($env:VCR_DISPOSABLE_VM -ne $ClientWindows -or
+        -not (Test-Path 'C:\RuntimeTests\disposable-vm.txt') -or
+        (Get-Content 'C:\RuntimeTests\disposable-vm.txt' -Raw).Trim() -ne $ClientWindows) { throw 'Not a disposable client VM.' }
+    $os = Get-CimInstance Win32_OperatingSystem
+    $images = Get-Content "$PSScriptRoot/client/images.json" -Raw | ConvertFrom-Json
+    if ($os.ProductType -ne 1 -or [int] $os.BuildNumber -ne $images.$ClientWindows.build -or -not [Environment]::Is64BitOperatingSystem) {
+        throw "Wrong client Windows image: $($os.Caption) $($os.BuildNumber)"
+    }
+    Write-Host "TEST OS: $($os.Caption), build $($os.BuildNumber), x64"
+} elseif ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
     throw 'Destructive lifecycle tests are restricted to disposable GitHub-hosted runners.'
 }
 $work = [IO.Path]::GetFullPath($WorkDirectory)
@@ -160,6 +174,7 @@ function Install-PreviousPatch {
 }
 
 try {
+    Invoke-TestProcess 'powershell.exe' "-NoProfile -STA -ExecutionPolicy Bypass -File `"$PSScriptRoot\Test-SelectionUi.ps1`" -PayloadRoot `"$payload`"" 120
     Register-TestSdk
     Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Mode check"
     Invoke-TestProcess $exe '/aiD /gm2' 120
@@ -218,6 +233,13 @@ try {
     foreach ($package in $removed) {
         if ($engine.ProductState($package.productCode) -eq 5) { throw "Update restored an absent MSI: $($package.id)" }
     }
+    Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Components vc2005 -Quiet"
+    foreach ($package in $removed) {
+        $installed = $engine.ProductState($package.productCode) -eq 5
+        if ($installed -ne ($package.family -eq '2005')) { throw "Component selection was not respected: $($package.id)" }
+    }
+    Write-Host 'PASS: selected VC++ 2005 only; every other removed MSI remains absent'
+    Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Components unknown-component -Quiet" -ExpectFailure
     Invoke-TestProcess $exe '/ai /gm2' 900
     Assert-Installed
     Assert-Applications

@@ -51,6 +51,18 @@ Assert-Equal (Get-PackageAction ([version]'14.51.1') $null 'update' $false) 'ski
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'install' $true) 'skip' 'repeat installation'
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'repair' $true) 'repair' 'repair registered package'
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'repair' $false) 'skip' 'do not repair a different product with this MSI'
+$selectionFixture = @(
+    [pscustomobject]@{ id = 'vc14-x86'; type = 'msi'; family = '2026' },
+    [pscustomobject]@{ id = 'vc14-x64'; type = 'msi'; family = '2026' },
+    [pscustomobject]@{ id = 'vc2005-x86'; type = 'msi'; family = '2005' },
+    [pscustomobject]@{ id = 'net8'; type = 'windowsdesktop'; channel = '8.0' },
+    [pscustomobject]@{ id = 'net12'; type = 'windowsdesktop'; channel = '12.0' }
+)
+Assert-Equal ((Select-Components $selectionFixture 'vc14, dotnet-8.0' | ForEach-Object id) -join ',') 'vc14-x86,vc14-x64,net8' 'Select only requested families and both architectures'
+Assert-Equal ((Select-Components $selectionFixture 'dotnet-12.0' | ForEach-Object id) -join ',') 'net12' 'Select a future stable Desktop branch'
+Assert-Equal @(Select-Components $selectionFixture 'VC14,vc14').Count 2 'Duplicate and case-insensitive selection'
+Assert-Throws { Select-Components $selectionFixture '' } 'empty component selection'
+Assert-Throws { Select-Components $selectionFixture 'vc14,unknown' } 'unknown component selection must fail before any installation'
 $temp = [IO.Path]::GetTempPath()
 Assert-Throws { Get-PayloadPath $temp '../outside.exe' } 'path traversal'
 Assert-Throws { Get-PayloadPath $temp ([IO.Path]::GetFullPath($temp)) } 'absolute payload path'

@@ -87,13 +87,18 @@ if (-not $Force -and $env:GITHUB_REPOSITORY -and $env:GH_TOKEN) {
     $response = & gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts?name=$artifactName&per_page=100"
     if ($LASTEXITCODE -ne 0) { throw 'Could not check previous build artifacts.' }
     $artifacts = $response | ConvertFrom-Json
-    if (@($artifacts.artifacts | Where-Object { -not $_.expired }).Count) {
+    $existing = $artifacts.artifacts | Where-Object { -not $_.expired } | Sort-Object id -Descending | Select-Object -First 1
+    if ($existing) {
         Write-Host "Verified package already exists: $artifactName"
         Add-Content $env:GITHUB_OUTPUT 'changed=false'
+        Add-Content $env:GITHUB_OUTPUT "verified_run_id=$($existing.workflow_run.id)"
         exit 0
     }
 }
-if ($env:GITHUB_OUTPUT) { Add-Content $env:GITHUB_OUTPUT 'changed=true' }
+if ($env:GITHUB_OUTPUT) {
+    Add-Content $env:GITHUB_OUTPUT 'changed=true'
+    Add-Content $env:GITHUB_OUTPUT "verified_run_id=$env:GITHUB_RUN_ID"
+}
 
 $sevenZipCommand = Get-Command 7z.exe -ErrorAction SilentlyContinue
 $sevenZip = if ($sevenZipCommand) { $sevenZipCommand.Source } else { "$env:ProgramFiles\7-Zip\7z.exe" }

@@ -11,7 +11,7 @@ on:
         default: false
   push:
     branches: [master, 'automation/**']
-    paths: ['automation/**', 'installer/**', 'build_tools/**', '.github/workflows/update.yml']
+    paths: ['automation/**', 'installer/**', 'build_tools/**', '.github/workflows/**']
 
 permissions:
   contents: read
@@ -41,6 +41,7 @@ jobs:
       changed: ${{ steps.build.outputs.changed }}
       artifact: ${{ steps.build.outputs.artifact }}
       candidate_id: ${{ steps.candidate.outputs.artifact-id }}
+      verified_run_id: ${{ steps.build.outputs.verified_run_id }}
     defaults:
       run:
         shell: pwsh
@@ -96,8 +97,16 @@ jobs:
         if: failure()
         run: ./automation/Diagnostics.ps1
 
+  client:
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    uses: ./.github/workflows/client-windows.yml
+    with:
+      artifact: unverified-${{ github.run_id }}-${{ github.run_attempt }}
+      run_id: ${{ github.run_id }}
+
   verified:
-    needs: [build, lifecycle]
+    needs: [build, lifecycle, client]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1, Node 24
@@ -113,8 +122,35 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  release:
+    needs: [build, verified]
+    if: >-
+      always() && !cancelled() && github.ref == 'refs/heads/master' &&
+      needs.build.result == 'success' &&
+      (needs.verified.result == 'success' || needs.build.outputs.changed == 'false')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, Node 24
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1, Node 24
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          run-id: ${{ needs.build.outputs.verified_run_id }}
+          github-token: ${{ github.token }}
+          path: dist
+      - name: GitHub Release с кратким описанием и установщиком
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: ./automation/Release.ps1
+
   cleanup:
-    needs: [build, lifecycle, verified]
+    needs: [build, lifecycle, client, verified, release]
     if: always() && needs.build.outputs.candidate_id != ''
     runs-on: ubuntu-latest
     permissions:
