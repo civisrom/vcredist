@@ -80,6 +80,8 @@ function Install-MixedBaseline {
 }
 
 function Test-MixedUpdateOnly($State) {
+    $initial = @{}
+    foreach ($package in $packages) { $initial[$package.id] = Get-InstalledVersion $engine $package }
     Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Mode update -Components vc14,dotnet-8.0,vc2013 -Quiet" 900
     $report = (Get-LatestInstallationReport).data
     if (-not $report.success) { throw 'Mixed update-only run failed.' }
@@ -91,7 +93,11 @@ function Test-MixedUpdateOnly($State) {
             if ($row.status -ne 'skipped' -or $null -ne $row.exitCode) { throw "Equal or missing VC2013 was not skipped: $($package.id)" }
             if ($package.arch -eq 'x86' -and (Get-InstalledVersion $engine $package)) { throw 'Update-only installed an absent component.' }
         } elseif ($row.status -ne 'not-selected') { throw "Update-only changed an unselected component: $($package.id)" }
-        $State.before[$package.id] = Get-InstalledVersion $engine $package
+        $actual = Get-InstalledVersion $engine $package
+        if ($row.status -in @('skipped', 'not-selected') -and $actual -ne $initial[$package.id]) {
+            throw "Update-only changed a preserved version: $($package.id), $($initial[$package.id]) -> $actual"
+        }
+        $State.before[$package.id] = $actual
     }
     Write-Host 'PASS: mixed update-only; older VC14/.NET8 updated, equal and absent VC2013 skipped, unselected versions preserved'
 }
@@ -103,6 +109,7 @@ function Assert-MixedUpgradeReport($State) {
         $row = @($report.packages | Where-Object id -eq $package.id)
         if ($row.Count -ne 1) { throw "Missing report row: $($package.id)" }
         $before = $State.before[$package.id]
+        if ($row[0].before -ne [string]$before) { throw "Wrong initial version in report: $($package.id)" }
         $expected = if (-not $before) { 'installed' } elseif ($before -lt [version]$package.version) { 'updated' } else { 'skipped' }
         if ($row[0].status -ne $expected) { throw "Wrong mixed result $($package.id): $($row[0].status), expected $expected" }
         $after = Get-InstalledVersion $engine $package
