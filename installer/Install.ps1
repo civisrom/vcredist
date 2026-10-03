@@ -86,6 +86,20 @@ public static class RuntimeMsi {
     $best
 }
 
+function Get-SupersededMsiPatches($Engine, $Package) {
+    if (-not $Package.PSObject.Properties['supersededPatches']) { return }
+    $patches = $Engine.Patches($Package.productCode)
+    try {
+        foreach ($code in $patches) {
+            if ([string]$code -in $Package.supersededPatches) { [string]$code }
+        }
+    } finally {
+        if ($null -ne $patches -and [Runtime.InteropServices.Marshal]::IsComObject($patches)) {
+            $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($patches)
+        }
+    }
+}
+
 function Get-DesktopVersion($Package) {
     $programFiles = $env:ProgramFiles
     if ($Package.arch -eq 'x86' -and [Environment]::Is64BitOperatingSystem) { $programFiles = ${env:ProgramFiles(x86)} }
@@ -246,7 +260,11 @@ function Invoke-Installation {
                 $arguments = "/i `"$path`" /qn /norestart /L*v `"$log`""
                 # Both minor upgrades (for example VC2005) and DLL-only patches
                 # (VC2010) keep ProductCode. Recache their new MSI and update files.
-                if ($exact) { $arguments += ' REINSTALL=ALL REINSTALLMODE=vomus' }
+                if ($exact) {
+                    $arguments += ' REINSTALL=ALL REINSTALLMODE=vomus'
+                    $patches = @(Get-SupersededMsiPatches $engine $package)
+                    if ($patches.Count) { $arguments += ' MSIPATCHREMOVE="' + ($patches -join ';') + '"' }
+                }
             } else {
                 $executable = $path
                 $operation = if ($action -eq 'repair') { '/repair' } else { '/install' }

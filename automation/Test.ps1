@@ -65,6 +65,15 @@ Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'insta
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'repair' $true) 'repair' 'repair registered package'
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'repair' $false) 'skip' 'do not repair a different product with this MSI'
 Assert-Equal (Get-PackageAction ([version]'10.0.40219.473') ([version]'10.0.40219.325') 'install' $true) 'install' 'VC2010 DLL patch update despite identical MSI metadata'
+$patchEngine = New-Object psobject
+$patchEngine | Add-Member ScriptMethod Patches { param($code) @('known-obsolete-patch', 'unrelated-patch') }
+$patchedPackage = [pscustomobject]@{ productCode = 'product'; supersededPatches = @('known-obsolete-patch', 'absent-patch') }
+Assert-Equal (@(Get-SupersededMsiPatches $patchEngine $patchedPackage) -join ',') 'known-obsolete-patch' 'Only remove a registered, explicitly superseded patch; preserve all others'
+Assert-Equal @(Get-SupersededMsiPatches $patchEngine ([pscustomobject]@{})).Count 0 'Other MSI packages must keep every patch'
+$patchedPackage.supersededPatches = @('absent-patch')
+Assert-Equal @(Get-SupersededMsiPatches $patchEngine $patchedPackage).Count 0 'Do not attempt to remove an absent patch'
+$patchEngine | Add-Member ScriptMethod Patches { param($code) } -Force
+Assert-Equal @(Get-SupersededMsiPatches $patchEngine $patchedPackage).Count 0 'An unpatched product has no obsolete patches'
 $selectionFixture = @(
     [pscustomobject]@{ id = 'vc14-x86'; type = 'msi'; family = '2026' },
     [pscustomobject]@{ id = 'vc14-x64'; type = 'msi'; family = '2026' },

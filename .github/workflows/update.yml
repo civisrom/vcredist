@@ -82,6 +82,12 @@ jobs:
         run: |
           powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./automation/Test-InteractiveInstall.ps1 -Installer ./.build/dist/Runtimes_AIO_x86_x64.exe -ScreenshotDirectory "$env:RUNNER_TEMP/interface-screenshots/sfx" -DialogsOnly
           if ($LASTEXITCODE -ne 0) { throw 'SFX dialog tests failed.' }
+      - name: Обновление VC2010 с зарегистрированным старым патчем
+        if: steps.build.outputs.changed == 'true'
+        run: ./automation/Test-Vc2010Upgrade.ps1
+      - name: Диагностика ранней проверки установки
+        if: failure() && steps.build.outputs.changed == 'true'
+        run: ./automation/Diagnostics.ps1
       - name: Зашифровать снимки для локальной проверки
         if: always() && inputs.screenshot_certificate != ''
         env:

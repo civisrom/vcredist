@@ -181,6 +181,11 @@ foreach ($msi in Get-ChildItem $payload -Recurse -Filter '*.msi' | Sort-Object D
         $metadata['msiVersion'] = $metadata.version
         $metadata['version'] = $versions[0]
         $metadata['runtimeFiles'] = @($dlls.Name | Sort-Object)
+        # The original EXE applies KB2565063 (.325) as a removable MSP. Without
+        # retiring that patch, its cached transform overwrites the .473 file table.
+        $metadata['supersededPatches'] = @(if ($metadata.arch -eq 'x86') {
+            '{6F8500D2-A80F-3347-9081-B41E71C8592B}'
+        } else { '{C67045D4-F4DE-3AB5-B2DB-E3F5DAC14D9C}' })
     }
     $packages.Add($metadata)
 }
