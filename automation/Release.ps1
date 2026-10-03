@@ -6,6 +6,7 @@ $tag = 'runtimes-' + $manifest.fingerprint.Substring(0, 12)
 $date = ([datetime] $manifest.builtAt).ToUniversalTime().ToString('yyyy.MM.dd')
 $vc = ($manifest.sources | Where-Object id -eq 'vc14-x64').version
 $net = ($manifest.packages | Where-Object { $_.type -eq 'windowsdesktop' -and $_.arch -eq 'x64' } | ForEach-Object version) -join ', '
+$testRun = if ($env:VERIFIED_RUN_ID) { $env:VERIFIED_RUN_ID } else { $env:GITHUB_RUN_ID }
 $body = @"
 Офлайн-установщик библиотек для Windows 10/11 x86/x64 с выбором компонентов.
 
@@ -15,7 +16,7 @@ $body = @"
 
 Visual C++ упакован компактно; .NET включён оригинальными установщиками Microsoft. Для тихой установки всего набора: ``/ai /gm2``. Состав и SHA256 приложены к релизу.
 
-[Инструкция](https://github.com/$env:GITHUB_REPOSITORY#readme) · [Проверки](https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID)
+[Инструкция](https://github.com/$env:GITHUB_REPOSITORY#readme) · [Проверки](https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$testRun)
 "@
 if ($Preview) { [pscustomobject]@{ tag = $tag; title = "Runtimes AIO — $date"; body = $body }; return }
 if ($env:GITHUB_REF -ne 'refs/heads/master') { throw 'Releases are only published from master.' }

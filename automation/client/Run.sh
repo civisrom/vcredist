@@ -9,6 +9,7 @@ root="$GITHUB_WORKSPACE"
 work="$RUNNER_TEMP/client-windows"
 mkdir -p "$work/storage" "$work/shared" "$work/oem"
 # Only unused toolchains on this disposable runner, never repository data.
+echo "Preparing disk space for $CLIENT_OS..."
 sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache
 available=$(df --output=avail -B1 "$work" | tail -n 1)
 (( available >= 40 * 1024 * 1024 * 1024 )) || { echo 'At least 40 GiB of free space is required.' >&2; exit 1; }
@@ -18,7 +19,8 @@ url=$(jq -r --arg os "$CLIENT_OS" '.[$os].url' "$catalog")
 checksum=$(jq -r --arg os "$CLIENT_OS" '.[$os].sha256' "$catalog")
 container=$(jq -r '.container' "$catalog")
 [[ "$url" == https://software-static.download.prss.microsoft.com/*.iso ]]
-curl --fail --show-error --silent --proto '=https' --max-time 900 --retry 3 "$url" -o "$work/storage/windows.iso"
+echo "Downloading the official $CLIENT_OS evaluation ISO..."
+curl --fail --show-error --silent --proto '=https' --max-time 900 --retry 3 --write-out 'Downloaded %{size_download} bytes at %{speed_download} bytes/s\n' "$url" -o "$work/storage/windows.iso"
 printf '%s  %s\n' "$checksum" "$work/storage/windows.iso" | sha256sum -c -
 
 cp -r "$root/automation" "$root/installer" "$work/shared/"
@@ -36,6 +38,7 @@ cleanup() {
   docker rm --force runtime-windows >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
+echo "Starting the disposable $CLIENT_OS VM..."
 docker run --detach --name runtime-windows --device=/dev/kvm --device=/dev/net/tun --cap-add NET_ADMIN \
   --env RAM_SIZE=8G --env CPU_CORES=4 --env DISK_SIZE=64G \
   --env DISK_FMT=qcow2 --env ALLOCATE=N --env BOOT_MODE=windows_secure \

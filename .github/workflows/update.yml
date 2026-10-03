@@ -149,6 +149,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          VERIFIED_RUN_ID: ${{ needs.build.outputs.verified_run_id }}
         run: ./automation/Release.ps1
 
   cleanup:

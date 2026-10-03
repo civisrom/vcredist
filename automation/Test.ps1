@@ -82,6 +82,31 @@ $view | Add-Member ScriptMethod Fetch { $this.Record }
 $database = New-Object psobject -Property @{ View = $view }
 $database | Add-Member ScriptMethod OpenView { param($query) $this.View }
 Assert-Equal (Get-MsiProperty $database 'ProductVersion') '8.0.61186' 'MSI property must be a scalar string'
+
+$releaseDirectory = Join-Path $temp ('runtime-release-test-' + [guid]::NewGuid().ToString('N'))
+$savedTestRun = $env:VERIFIED_RUN_ID
+try {
+    $null = New-Item -ItemType Directory $releaseDirectory
+    $env:VERIFIED_RUN_ID = '123456'
+    $releaseFixture = @{
+        fingerprint = ('a' * 64); builtAt = '2026-01-02T03:04:05Z'
+        sources = @(@{ id = 'vc14-x64'; version = '14.51.36247.0' })
+        packages = @(@{ type = 'windowsdesktop'; arch = 'x64'; version = '8.0.31' })
+    }
+    $releaseFixture | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $releaseDirectory 'manifest.json') -Encoding UTF8
+    $notes = & "$PSScriptRoot/Release.ps1" -Directory $releaseDirectory -Preview
+    Assert-Equal $notes.tag 'runtimes-aaaaaaaaaaaa' 'Release identity follows the verified fingerprint'
+    Assert-Equal $notes.body.Contains('14.51.36247.0') $true 'Release lists the actual VC++ version'
+    Assert-Equal $notes.body.Contains('8.0.31') $true 'Release lists the actual Desktop version'
+    Assert-Equal $notes.body.Contains('/actions/runs/123456)') $true 'Release links to the verified run'
+    Assert-Equal $notes.body.Contains('`/ai /gm2`') $true 'Release preserves the silent-install command'
+    $releaseFixture.fingerprint = 'invalid'
+    $releaseFixture | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $releaseDirectory 'manifest.json') -Encoding UTF8
+    Assert-Throws { & "$PSScriptRoot/Release.ps1" -Directory $releaseDirectory -Preview } 'Reject an invalid release identity'
+} finally {
+    $env:VERIFIED_RUN_ID = $savedTestRun
+    Remove-Item $releaseDirectory -Recurse -Force
+}
 if ([Environment]::OSVersion.Platform -eq 'Win32NT') {
     $engine = New-Object -ComObject WindowsInstaller.Installer
     try {
