@@ -29,6 +29,9 @@ public static class RuntimeWindowProbe {
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr window);
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr window, IntPtr context);
     [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr context, IntPtr value);
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] private static extern int GetObject(IntPtr value, int size, byte[] data);
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr CreateFontIndirect(byte[] font);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr value);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int DrawText(IntPtr context, string text, int count, ref Rect rectangle, uint format);
 
     private static RuntimeWindow Describe(IntPtr window) {
@@ -81,17 +84,29 @@ public static class RuntimeWindowProbe {
             IntPtr dc = GetDC(child.Handle);
             if (dc == IntPtr.Zero) throw new Exception("Cannot measure control: " + child.Title);
             IntPtr previous = IntPtr.Zero;
+            IntPtr localFont = IntPtr.Zero;
             try {
-                if (handle != IntPtr.Zero) previous = SelectObject(dc, handle);
+                if (handle != IntPtr.Zero) {
+                    // A font handle from WM_GETFONT belongs to the other process.
+                    // Read its LOGFONT and create a font owned by this probe.
+                    var description = new byte[92]; // LOGFONTW
+                    if (GetObject(handle, description.Length, description) == 0)
+                        throw new Exception("Cannot read control font: " + child.Title);
+                    localFont = CreateFontIndirect(description);
+                    if (localFont == IntPtr.Zero) throw new Exception("Cannot create measurement font.");
+                    previous = SelectObject(dc, localFont);
+                    if (previous == IntPtr.Zero) throw new Exception("Cannot select measurement font.");
+                }
                 var measured = new Rect { Right = Math.Max(1, child.Bounds.Width - (kind.Contains("button") ? 6 : 0)) };
                 uint flags = 0x0400 | 0x0010; // DT_CALCRECT | DT_WORDBREAK
                 if (!kind.Contains("button")) flags |= 0x0800; // DT_NOPREFIX
                 if (DrawText(dc, child.Title, child.Title.Length, ref measured, flags) == 0)
                     throw new Exception("Cannot measure control text: " + child.Title);
                 if (measured.Bottom > child.Bounds.Height + 3 || measured.Right > child.Bounds.Width)
-                    throw new Exception("Clipped control text: " + child.Title);
+                    throw new Exception("Clipped control text: " + child.Title + " (measured " + measured.Right + "x" + measured.Bottom + ", control " + child.Bounds.Size + ")");
             } finally {
                 if (previous != IntPtr.Zero) SelectObject(dc, previous);
+                if (localFont != IntPtr.Zero) DeleteObject(localFont);
                 ReleaseDC(child.Handle, dc);
             }
         }
