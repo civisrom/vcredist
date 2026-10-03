@@ -13,7 +13,12 @@ function Assert-Throws([scriptblock] $Action, [string] $Message) {
     $script:checks++
 }
 
-foreach ($path in Get-ChildItem (Split-Path $PSScriptRoot) -Filter '*.ps1' -Recurse | Where-Object { $_.FullName -notmatch '[/\\]\.build[/\\]' }) {
+$scripts = @('automation', 'installer') | ForEach-Object {
+    Get-ChildItem (Join-Path (Split-Path $PSScriptRoot) $_) -Filter '*.ps1' -File -Recurse |
+        Where-Object Extension -eq '.ps1'
+}
+# Windows PowerShell's file filter can also match .ps1xml; scan only our scripts.
+foreach ($path in $scripts) {
     if ([IO.File]::ReadAllText($path.FullName) -match '[^\x00-\x7F]') {
         $bytes = [IO.File]::ReadAllBytes($path.FullName)
         Assert-Equal ([BitConverter]::ToString($bytes, 0, 3)) 'EF-BB-BF' "UTF-8 BOM required by Windows PowerShell 5.1: $($path.Name)"
