@@ -34,15 +34,15 @@ try {
     $env:ImageOS = $platform
     Set-Location $root
     if ($resumed) {
-        & "$root\pwsh\pwsh.exe" -NoProfile -File "$root\automation\client\After-Reboot.ps1"
+        & "$root\pwsh\pwsh.exe" -NoProfile -File "$root\automation\client\After-Reboot.ps1" | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Runtime verification after reboot failed.' }
         $success = $true
     } else {
-        & "$root\pwsh\pwsh.exe" -NoProfile -File "$root\automation\Test.ps1"
+        & "$root\pwsh\pwsh.exe" -NoProfile -File "$root\automation\Test.ps1" | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 tests failed.' }
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root\automation\Test.ps1"
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root\automation\Test.ps1" | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell tests failed.' }
-        & "$root\pwsh\pwsh.exe" -NoProfile -File "$root\automation\Smoke.ps1" -ClientWindows $platform
+        & "$root\pwsh\pwsh.exe" -NoProfile -File "$root\automation\Smoke.ps1" -ClientWindows $platform | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Client lifecycle tests failed.' }
         Set-Content "$root\reboot-pending.txt" (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')
         # Resume under the same interactive test account after a real reboot.

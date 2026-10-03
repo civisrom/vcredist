@@ -25,9 +25,17 @@ foreach ($file in $files) { if (-not (Test-Path (Join-Path $Directory $file))) {
 $expectedHash = ((Get-Content (Join-Path $Directory 'SHA256SUMS') -Raw).Trim() -split '\s+')[0]
 if ((Get-Sha256 (Join-Path $Directory $files[0])) -ne $expectedHash) { throw 'Release installer SHA256 mismatch.' }
 
-$existingJson = & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" 2>$null
-$releaseExists = $LASTEXITCODE -eq 0
-$existing = if ($releaseExists) { $existingJson | ConvertFrom-Json } else { $null }
+function Get-RepositoryRelease {
+    # The REST tag endpoint returns published releases only. The CLI also finds drafts.
+    $metadata = & gh release view $tag --json databaseId 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $releaseId = ($metadata | ConvertFrom-Json).databaseId
+    $json = & gh api "repos/$env:GITHUB_REPOSITORY/releases/$releaseId"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read release metadata.' }
+    $json | ConvertFrom-Json
+}
+$existing = Get-RepositoryRelease
+$releaseExists = $null -ne $existing
 if ($releaseExists -and -not $existing.draft) {
     foreach ($file in $files) {
         if (@($existing.assets | Where-Object { $_.name -eq $file -and $_.state -eq 'uploaded' }).Count -ne 1) {
@@ -49,8 +57,8 @@ if (-not $releaseExists) {
     Invoke-Checked 'gh' @('release', 'edit', $tag, '--title', "Runtimes AIO — $date", '--notes-file', $notes)
 }
 Invoke-Checked 'gh' (@('release', 'upload', $tag, '--clobber') + @($files | ForEach-Object { Join-Path $Directory $_ }))
-$release = & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0) { throw 'Could not verify draft assets.' }
+$release = Get-RepositoryRelease
+if (-not $release) { throw 'Could not verify draft assets.' }
 foreach ($file in $files) {
     $asset = @($release.assets | Where-Object { $_.name -eq $file -and $_.state -eq 'uploaded' })
     if ($asset.Count -ne 1 -or $asset[0].digest -ne ('sha256:' + (Get-Sha256 (Join-Path $Directory $file)))) {

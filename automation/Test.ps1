@@ -112,6 +112,7 @@ try {
     $env:VERIFIED_RUN_ID = $savedTestRun
     Remove-Item $releaseDirectory -Recurse -Force
 }
+$checks += & "$PSScriptRoot/Test-Release.ps1"
 if ([Environment]::OSVersion.Platform -eq 'Win32NT') {
     $engine = New-Object -ComObject WindowsInstaller.Installer
     try {
