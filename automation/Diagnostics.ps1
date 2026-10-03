@@ -4,7 +4,7 @@ foreach ($root in $roots) {
     if (-not (Test-Path $root)) { continue }
     Get-ChildItem $root -Filter '*.log' -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 6 | ForEach-Object {
         Write-Host "--- $($_.Name) ---"
-        Select-String -LiteralPath $_.FullName -Pattern 'Found dependent|Disallow|WixDependencyCheck|Return value 3|error 0x|Will not uninstall' |
+        Select-String -LiteralPath $_.FullName -Pattern 'Found dependent|Disallow|WixDependencyCheck|Return value 3|error 0x|Will not uninstall|REINSTALL|PackageCode|Packagecode|Component: C_CENTRAL_|File: .*100.*dll' |
             Select-Object -Last 20 | ForEach-Object { Write-Host $_.Line }
         Get-Content $_.FullName -Tail 35 | Write-Host
     }
@@ -13,6 +13,12 @@ foreach ($directory in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
     $fxr = Join-Path $directory 'dotnet/host/fxr'
     if (Test-Path $fxr) {
         Get-ChildItem $fxr -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+    }
+}
+foreach ($folder in @('System32', 'SysWOW64')) {
+    foreach ($file in @('msvcr100.dll', 'msvcp100.dll', 'mfc100.dll', 'vcomp100.dll')) {
+        $path = Join-Path "$env:SystemRoot/$folder" $file
+        if (Test-Path $path) { Write-Host "$folder/$file`: $((Get-Item $path).VersionInfo.FileVersion)" }
     }
 }
 Get-Process | Where-Object MainWindowTitle | Select-Object ProcessName, MainWindowTitle | Format-Table

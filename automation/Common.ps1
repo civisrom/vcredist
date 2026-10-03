@@ -113,3 +113,18 @@ function Get-MsiMetadata([string] $Path) {
         $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine)
     }
 }
+
+function Reset-MsiPackageCode([string] $Path) {
+    $engine = New-Object -ComObject WindowsInstaller.Installer
+    $summary = $null
+    try {
+        $summary = $engine.SummaryInformation($Path, 1)
+        $code = [guid]::NewGuid().ToString('B').ToUpperInvariant()
+        $null = $summary.GetType().InvokeMember('Property', [Reflection.BindingFlags]::SetProperty, $null, $summary, @(9, $code))
+        $null = $summary.Persist()
+        $code
+    } finally {
+        if ($summary) { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($summary) }
+        $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine)
+    }
+}

@@ -151,5 +151,26 @@ if ([Environment]::OSVersion.Platform -eq 'Win32NT') {
         $absent = [pscustomobject]@{ type = 'msi'; upgradeCode = [guid]::NewGuid().ToString('B'); productCode = [guid]::NewGuid().ToString('B') }
         Assert-Equal (Get-InstalledVersion $engine $absent) $null 'Empty Windows Installer COM collection'
     } finally { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine) }
+    $fixture = Join-Path $temp ('runtime-package-code-' + [guid]::NewGuid().ToString('N') + '.msi')
+    $engine = New-Object -ComObject WindowsInstaller.Installer
+    $database = $null; $summary = $null
+    try {
+        $database = $engine.OpenDatabase($fixture, 3)
+        $null = $database.Commit()
+        $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($database)
+        $database = $null
+        $first = Reset-MsiPackageCode $fixture
+        $second = Reset-MsiPackageCode $fixture
+        Assert-Equal ($first -ne $second) $true 'Each repack gets a distinct package identity'
+        Assert-Equal $second $second.ToUpperInvariant() 'MSI package GUID uses uppercase letters'
+        $null = [guid]::Parse($second)
+        $summary = $engine.SummaryInformation($fixture, 0)
+        Assert-Equal $summary.Property(9) $second 'Package identity is persisted in the MSI summary stream'
+    } finally {
+        if ($summary) { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($summary) }
+        if ($database) { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) }
+        $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine)
+        Remove-Item $fixture -ErrorAction SilentlyContinue
+    }
 }
 Write-Host "$checks checks passed."
