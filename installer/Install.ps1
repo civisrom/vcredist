@@ -118,6 +118,18 @@ function New-InstallationResult($Package) {
     }
 }
 
+function Complete-InstallationResult($Result, [version] $Actual, [version] $Installed, [string] $Action, [string] $Log) {
+    $Result.after = if ($Actual) { "$Actual" } else { '' }
+    if (-not $Actual -or $Actual -lt [version] $Result.available) {
+        if ($Result.exitCode -ne 3010) { throw "Не подтверждена установка $($Result.id). Журнал: $Log" }
+        $Result.status = 'pending-reboot'
+        $Result.reason = 'Установщик запросил перезагрузку; новая версия пока не подтверждена. Перезагрузите Windows и запустите пакет повторно для проверки.'
+        return
+    }
+    $Result.status = if ($Action -eq 'repair') { 'repaired' } elseif ($Installed) { 'updated' } else { 'installed' }
+    $Result.reason = if ($Action -eq 'repair') { 'Компонент восстановлен; версия проверена.' } else { 'Установка завершена; версия проверена.' }
+}
+
 function Save-InstallationReport([object[]] $Results, [string] $Directory, [bool] $Reboot, [string] $Failure) {
     $null = New-Item -ItemType Directory -Path $Directory -Force
     $report = [ordered]@{
@@ -250,10 +262,7 @@ function Invoke-Installation {
             if ($process.ExitCode -notin @(0, 3010)) { throw "Ошибка установки $($package.id): $($process.ExitCode). Журнал: $log" }
             if ($process.ExitCode -eq 3010) { $reboot = $true }
             $actual = Get-InstalledVersion $engine $package
-            $currentResult.after = if ($actual) { "$actual" } else { '' }
-            if (-not $actual -or $actual -lt [version] $package.version) { throw "Не подтверждена установка $($package.id). Журнал: $log" }
-            $currentResult.status = if ($action -eq 'repair') { 'repaired' } elseif ($installed) { 'updated' } else { 'installed' }
-            $currentResult.reason = if ($action -eq 'repair') { 'Компонент восстановлен; версия проверена.' } else { 'Установка завершена; версия проверена.' }
+            Complete-InstallationResult $currentResult $actual $installed $action $log
             $completed++
         }
         if ($Mode -ne 'check') { Write-Host "Установка завершена. Отчёт и журналы: $logDir" }

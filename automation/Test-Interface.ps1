@@ -41,7 +41,7 @@ foreach ($family in @('2005', '2008', '2010', '2012', '2013', '2026', 'vbc', 'vs
 foreach ($channel in @('6.0', '7.0', '8.0', '9.0', '10.0', '12.0')) {
     $packages += [pscustomobject]@{ id = "desktop-$channel"; type = 'windowsdesktop'; family = 'dotnet'; channel = $channel; arch = 'x64'; version = "$channel.31"; name = ".NET Windows Desktop Runtime $channel" }
 }
-$statuses = @('installed', 'updated', 'repaired', 'skipped', 'not-selected', 'not-applicable', 'failed', 'not-run')
+$statuses = @('installed', 'updated', 'repaired', 'skipped', 'not-selected', 'not-applicable', 'failed', 'not-run', 'pending-reboot')
 $rows = @()
 for ($index = 0; $index -lt 32; $index++) {
     $row = New-InstallationResult $packages[$index % $packages.Count]
@@ -75,8 +75,12 @@ try {
                         $window.Controls.Find('CancelSelection', $true)[0].PerformClick()
                     } else {
                         $grid = $window.Controls.Find('ResultTable', $true)[0]
+                        $detail = $window.Controls.Find('ResultDetail', $true)[0]
+                        if (-not $detail.Text.Contains($displayRows[0].reason)) { throw 'Initial result details are missing.' }
                         if ($grid.Rows.Count -ne $rows.Count) { throw 'The report lost rows.' }
                         for ($rowIndex = 0; $rowIndex -lt $grid.Rows.Count; $rowIndex++) {
+                            $grid.CurrentCell = $grid.Rows[$rowIndex].Cells[0]
+                            if (-not $detail.Text.Contains($displayRows[$rowIndex].name) -or -not $detail.Text.Contains($displayRows[$rowIndex].reason)) { throw "Missing result details for row $rowIndex" }
                             $grid.FirstDisplayedScrollingRowIndex = $rowIndex
                             $grid.AutoResizeRow($rowIndex, [Windows.Forms.DataGridViewAutoSizeRowMode]::AllCells)
                         }
@@ -96,6 +100,9 @@ try {
                     $displayRows = @($rows | ForEach-Object { $_.PSObject.Copy() })
                     if ($scenario -ne 'failure') {
                         foreach ($row in $displayRows | Where-Object { $_.status -in @('failed', 'not-run') }) { $row.status = 'skipped' }
+                    }
+                    if ($scenario -ne 'reboot') {
+                        foreach ($row in $displayRows | Where-Object status -eq 'pending-reboot') { $row.status = 'skipped' }
                     }
                     Save-InstallationReport $displayRows $temp ($scenario -eq 'reboot') $failure
                     Show-InstallationResult $displayRows $temp ($scenario -eq 'reboot') $failure

@@ -24,6 +24,16 @@ function Get-DotNetChannels($Index) {
     $channels
 }
 
+function Get-PreviousDesktopRelease($Metadata, [version] $Version) {
+    $channel = "$($Version.Major).$($Version.Minor)."
+    $previous = $Metadata.releases | Where-Object {
+        $_.PSObject.Properties['windowsdesktop'] -and $_.windowsdesktop.version -match '^\d+\.\d+\.\d+$' -and
+        $_.windowsdesktop.version.StartsWith($channel) -and [version] $_.windowsdesktop.version -lt $Version
+    } | Sort-Object { [version] $_.windowsdesktop.version } -Descending | Select-Object -First 1
+    if (-not $previous -and $Version.Build -ne 0) { throw "No previous stable Desktop patch for $Version in Microsoft metadata." }
+    $previous
+}
+
 # Check every redirect, not only the first and last host.
 function Save-Download([string] $Url, [string] $Path, [switch] $Microsoft, [string] $Sha256) {
     $handler = [System.Net.Http.HttpClientHandler]::new()

@@ -48,11 +48,11 @@ function Install-MixedBaseline {
         $metadataPath = Join-Path $directory ("desktop-$($group.Name).json")
         $null = Save-Download "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/$($group.Name)/releases.json" $metadataPath -Microsoft
         $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
-        $older = $metadata.releases | Where-Object {
-            $_.PSObject.Properties['windowsdesktop'] -and $_.windowsdesktop.version -match '^\d+\.\d+\.\d+$' -and
-            [version]$_.windowsdesktop.version -lt [version]$group.Group[0].version
-        } | Sort-Object { [version]$_.windowsdesktop.version } -Descending | Select-Object -First 1
-        if (-not $older) { throw "No previous stable patch for $($group.Name)." }
+        $older = Get-PreviousDesktopRelease $metadata ([version]$group.Group[0].version)
+        if (-not $older) {
+            Write-Host "First stable Desktop release $($group.Group[0].version): test fresh installation; no earlier stable patch exists."
+            continue
+        }
         foreach ($package in $group.Group) {
             $file = @($older.windowsdesktop.files | Where-Object { $_.rid -eq "win-$($package.arch)" -and $_.name -eq "windowsdesktop-runtime-win-$($package.arch).exe" })
             if ($file.Count -ne 1 -or $file[0].hash -notmatch '^[a-fA-F0-9]{128}$') { throw 'Invalid previous Desktop package.' }

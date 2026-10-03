@@ -50,6 +50,10 @@ $index = '{"releases-index":[
 ]}' | ConvertFrom-Json
 Assert-Equal ((Get-DotNetChannels $index | ForEach-Object { $_.'channel-version' }) -join ',') '6.0,7.0,9.0,10.0,12.0' 'Keep legacy and discover future stable .NET, exclude preview'
 Assert-Throws { Get-DotNetChannels ('{"releases-index":[]}' | ConvertFrom-Json) } 'empty channel metadata'
+$futureReleases = '{"releases":[{"windowsdesktop":{"version":"12.0.0"}},{"windowsdesktop":{"version":"12.0.0-rc.1"}},{"windowsdesktop":{"version":"10.0.12"}}]}' | ConvertFrom-Json
+Assert-Equal (Get-PreviousDesktopRelease $futureReleases ([version]'12.0.0')) $null 'A first stable branch needs fresh-install tests without a nonexistent previous patch'
+Assert-Equal (Get-PreviousDesktopRelease $futureReleases ([version]'12.0.1')).windowsdesktop.version '12.0.0' 'The next patch must upgrade from the first stable release'
+Assert-Throws { Get-PreviousDesktopRelease ('{"releases":[]}' | ConvertFrom-Json) ([version]'12.0.1') } 'Missing history for an existing branch must not silently skip upgrade coverage'
 
 Assert-Equal (Get-PackageAction ([version]'14.51.1') $null 'install' $false) 'install' 'missing runtime'
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.44.1') 'install' $false) 'install' 'older runtime'
@@ -88,6 +92,18 @@ try {
     Assert-Equal $report.packages[1].status 'not-run' 'Do not claim installation of unprocessed packages'
     Assert-Equal $report.packages[0].exitCode 3010 'Preserve the native installer exit code'
     Assert-Equal ((Get-Content (Join-Path $reportDirectory 'report.txt') -Raw).Contains('10.0.40219.473')) $true 'Readable report retains the complete patch version'
+    Complete-InstallationResult $result ([version]'10.0.40219.325') ([version]'10.0.40219.325') 'install' 'test.log'
+    Assert-Equal $result.status 'pending-reboot' 'A deferred replacement is pending rather than confirmed or failed'
+    Assert-Equal $result.after '10.0.40219.325' 'Do not claim the new DLL version before reboot'
+    Complete-InstallationResult $result $null ([version]'10.0.40219.325') 'install' 'test.log'
+    Assert-Equal $result.after '' 'Do not invent a version when replacement is pending'
+    $result.exitCode = 0
+    Assert-Throws { Complete-InstallationResult $result ([version]'10.0.40219.325') ([version]'10.0.40219.325') 'install' 'test.log' } 'Without a reboot request, an unconfirmed update is an error'
+    Complete-InstallationResult $result ([version]'10.0.40219.473') ([version]'10.0.40219.325') 'install' 'test.log'
+    Assert-Equal $result.status 'updated' 'Confirm a completed DLL patch update'
+    $result.exitCode = 3010
+    Complete-InstallationResult $result ([version]'10.0.40219.473') ([version]'10.0.40219.473') 'repair' 'test.log'
+    Assert-Equal $result.status 'repaired' 'A confirmed repair can still request a reboot'
 } finally { Remove-Item $reportDirectory -Recurse -Force }
 Assert-Throws { Get-PayloadPath $temp '../outside.exe' } 'path traversal'
 Assert-Throws { Get-PayloadPath $temp ([IO.Path]::GetFullPath($temp)) } 'absolute payload path'

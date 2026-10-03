@@ -8,11 +8,11 @@ $vc = ($manifest.sources | Where-Object id -eq 'vc14-x64').version
 $net = ($manifest.packages | Where-Object { $_.type -eq 'windowsdesktop' -and $_.arch -eq 'x64' } | ForEach-Object version) -join ', '
 $testRun = if ($env:VERIFIED_RUN_ID) { $env:VERIFIED_RUN_ID } else { $env:GITHUB_RUN_ID }
 $body = @"
-Офлайн-установщик библиотек для Windows 10/11 x86/x64 с выбором компонентов.
+Офлайн-установщик библиотек для Windows 10/11 x86/x64 с выбором компонентов и итоговым отчётом о версиях и результатах установки.
 
 - Visual C++ 2005–2013, актуальный v14 ($vc), VSTO и старые VB/C.
 - .NET Windows Desktop Runtime: $net.
-- Проверены установка, выбор компонентов, восстановление и удаление на Windows 10 22H2, Windows 11 25H2 и Windows Server 2022/2025; на клиентских Windows также проверен запуск после перезагрузки.
+- Проверены установка, восстановление и удаление на Windows 10 22H2, Windows 11 25H2 и Windows Server 2022/2025; на клиентских Windows — обновление смешанного набора старых версий, защита от понижения, интерфейс и повторный запуск после перезагрузки.
 
 Visual C++ упакован компактно; .NET включён оригинальными установщиками Microsoft. Для тихой установки всего набора: ``/ai /gm2``. Состав и SHA256 приложены к релизу.
 

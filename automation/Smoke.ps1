@@ -158,10 +158,7 @@ function Install-PreviousPatch {
     $metadataPath = Join-Path $work 'previous-release.json'
     $null = Save-Download "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/$($package.channel)/releases.json" $metadataPath -Microsoft
     $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
-    $previous = $metadata.releases | Where-Object {
-        $_.PSObject.Properties['windowsdesktop'] -and $_.windowsdesktop.version -match '^\d+\.\d+\.\d+$' -and
-        [version] $_.windowsdesktop.version -lt [version] $package.version
-    } | Sort-Object { [version] $_.windowsdesktop.version } -Descending | Select-Object -First 1
+    $previous = Get-PreviousDesktopRelease $metadata ([version]$package.version)
     if (-not $previous) { throw 'No previous stable Desktop patch in Microsoft metadata.' }
     $file = @($previous.windowsdesktop.files | Where-Object { $_.rid -eq 'win-x86' -and $_.name -eq 'windowsdesktop-runtime-win-x86.exe' })
     if ($file.Count -ne 1 -or $file[0].hash -notmatch '^[a-fA-F0-9]{128}$') { throw 'Invalid previous .NET release.' }

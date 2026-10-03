@@ -39,6 +39,7 @@ function Receive-Source($Source, [switch] $Legacy) {
         $version = $Matches[0]
         if ([version] $version -lt [version] $Source.minimumVersion) { throw "Microsoft returned an older package: $($Source.id) $version" }
     }
+    if ($Source.id -like 'vc14-*' -and ([version] $version).Major -ne 14) { throw 'A new VC++ family requires review of its build and install recipe.' }
     $sources.Add([ordered]@{ id = $Source.id; url = $resolved; sha256 = $hash; version = $version; policy = $(if ($Legacy) { 'pinned-legacy-monitor' } else { 'microsoft-current' }) })
     Write-Host "$($Source.id): $version, SHA256 $hash"
 }

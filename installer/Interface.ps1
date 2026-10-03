@@ -1,6 +1,6 @@
 ﻿function Get-ComponentLabel([string] $Id) {
     switch ($Id) {
-        'vc14' { 'Visual C++ 2015–2026 (v14)' }
+        'vc14' { 'Visual C++ v14 (2015 и новее)' }
         'vbc' { 'Visual Basic / Visual C++ 2002–2003' }
         'vstor' { 'Visual Studio Tools for Office Runtime' }
         default {
@@ -15,6 +15,7 @@ function Get-ResultLabel([string] $Status) {
         'installed' { 'Установлено' }
         'updated' { 'Обновлено' }
         'repaired' { 'Восстановлено' }
+        'pending-reboot' { 'Ожидает перезагрузки' }
         'skipped' { 'Пропущено' }
         'not-selected' { 'Не выбрано' }
         'not-applicable' { 'Не требуется' }
@@ -161,12 +162,12 @@ function Set-InstallationProgress($Window, [string] $Heading, [string] $Detail, 
 function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [bool] $Reboot, [string] $Failure) {
     $form = New-RuntimeWindow 'Результат установки' 1120 680
     $counts = @{}
-    foreach ($status in @('installed', 'updated', 'repaired', 'skipped', 'not-selected', 'not-applicable', 'failed', 'not-run')) {
+    foreach ($status in @('installed', 'updated', 'repaired', 'pending-reboot', 'skipped', 'not-selected', 'not-applicable', 'failed', 'not-run')) {
         $counts[$status] = @($Results | Where-Object status -eq $status).Count
     }
     $heading = if ($Failure) { 'Установка завершилась с ошибкой. Подробности приведены ниже.' } else { 'Обработка выбранных библиотек завершена.' }
     $summary = "$heading`r`nУстановлено: $($counts.installed). Обновлено: $($counts.updated). Восстановлено: $($counts.repaired). Пропущено: $($counts.skipped + $counts.'not-selected' + $counts.'not-applicable'). Ошибок: $($counts.failed). Не выполнено: $($counts.'not-run')."
-    if ($Reboot) { $summary += "`r`nДля завершения установки перезагрузите Windows." }
+    if ($Reboot) { $summary += "`r`nДля завершения установки перезагрузите Windows. Ожидают перезагрузки: $($counts.'pending-reboot')." }
     $form.Tag.Layout.Controls.Add((New-RuntimeLabel 'ResultSummary' $summary), 0, 0)
     $grid = New-Object Windows.Forms.DataGridView
     $grid.Name = 'ResultTable'
@@ -215,12 +216,14 @@ function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [b
     $detail.Dock = 'Fill'
     $detail.Margin = New-Object Windows.Forms.Padding(0, 10, 0, 0)
     $detail.Text = $Failure
-    $grid.Add_SelectionChanged({
+    $updateDetail = {
         if ($grid.CurrentRow) {
             $item = $Results[$grid.CurrentRow.Index]
             $detail.Text = $(if ($Failure) { "$Failure`r`n" }) + $item.name + "`r`n" + $item.reason
         }
-    })
+    }
+    $grid.Add_CurrentCellChanged($updateDetail)
+    $form.Add_Shown($updateDetail)
     $form.Tag.Layout.Controls.Add($detail, 0, 2)
     $buttons = New-RuntimeButtons
     $report = New-RuntimeButton 'OpenReport' 'Открыть отчёт'
