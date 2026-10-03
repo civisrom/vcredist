@@ -3,6 +3,7 @@ $env:PSModulePath = Join-Path $PSHOME 'Modules'
 . (Join-Path $PayloadRoot 'Install.ps1')
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -Path "$PSScriptRoot/probes/WindowProbe.cs" -ReferencedAssemblies System, System.Drawing, System.Windows.Forms
 if ($ScreenshotDirectory) { $null = New-Item -ItemType Directory $ScreenshotDirectory -Force }
 
 function Assert-Layout($Control) {
@@ -25,6 +26,9 @@ function Assert-Layout($Control) {
 function Save-Window($Window, [string] $Name) {
     $Window.PerformLayout()
     [Windows.Forms.Application]::DoEvents()
+    $native = [RuntimeWindowProbe]::Windows([IntPtr]::Zero) | Where-Object Handle -eq $Window.Handle
+    if (-not $native) { throw 'The tested window is not visible.' }
+    [RuntimeWindowProbe]::AssertTextFits($native)
     if (-not $ScreenshotDirectory) { Assert-Layout $Window; return }
     $bitmap = New-Object Drawing.Bitmap($Window.Width, $Window.Height)
     try {
