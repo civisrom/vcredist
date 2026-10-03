@@ -244,9 +244,9 @@ function Invoke-Installation {
             if ($package.type -eq 'msi') {
                 $executable = "$env:SystemRoot\System32\msiexec.exe"
                 $arguments = "/i `"$path`" /qn /norestart /L*v `"$log`""
-                $sameMsi = $exact -and $package.PSObject.Properties['msiVersion'] -and
-                    [version] $engine.ProductInfo($package.productCode, 'VersionString') -eq [version] $package.msiVersion
-                if ($action -eq 'repair' -or $sameMsi) { $arguments += ' REINSTALL=ALL REINSTALLMODE=vomus' }
+                # Both minor upgrades (for example VC2005) and DLL-only patches
+                # (VC2010) keep ProductCode. Recache their new MSI and update files.
+                if ($exact) { $arguments += ' REINSTALL=ALL REINSTALLMODE=vomus' }
             } else {
                 $executable = $path
                 $operation = if ($action -eq 'repair') { '/repair' } else { '/install' }

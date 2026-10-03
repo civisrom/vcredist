@@ -75,12 +75,12 @@ foreach ($scenario in $scenarios) {
         if ($scenario -eq 'cancel' -and (-not $seen.extract -or -not $seen.cancel)) { throw 'Extraction cancellation was not exercised.' }
         if ($scenario -eq 'install') {
             foreach ($stage in @('extract', 'verify', 'selection', 'result')) { if (-not $seen[$stage]) { throw "Missing installation stage: $stage" } }
-            if (-not $Repeat -and $packageIndex -lt 2) { throw 'No package installation progress was captured.' }
             $reportFile = Get-ChildItem "$env:ProgramData/civisrom/VisualCppRedist/logs" -Filter report.json -Recurse |
                 Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
             $report = Get-Content $reportFile.FullName -Raw | ConvertFrom-Json
             Copy-Item $reportFile.FullName (Join-Path $ScreenshotDirectory 'installation-report.json')
             if (-not $report.success) { throw "Interactive installation failed: $($report.error)" }
+            if (-not $Repeat -and $packageIndex -lt 2) { throw 'No package installation progress was captured.' }
             if ($Repeat -and (@($report.packages | Where-Object { $_.status -notin @('skipped', 'not-applicable') -or $null -ne $_.exitCode }).Count -or $packageIndex)) {
                 throw 'The repeated interactive installation did not skip all equal versions.'
             }
