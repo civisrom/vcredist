@@ -29,7 +29,13 @@ function Install-MixedBaseline {
         }
         $path = Join-Path $directory ($source.id + '.exe')
         $null = Save-Download $url $path -Microsoft -Sha256 $source.sha256
-        $arguments = if ($source.id -match '^vc(2005|2008|2010)-') { '/q /norestart' } else { '/install /quiet /norestart' }
+        # VC2005 wraps its MSI in IExpress; forward silent flags to msiexec.
+        $arguments = switch -Regex ($source.id) {
+            '^vc2005-' { '/Q /C:"msiexec /i vcredist.msi /qn /norestart"'; break }
+            '^vc2008-' { '/qn /norestart'; break }
+            '^vc2010-' { '/q /norestart'; break }
+            default { '/install /quiet /norestart' }
+        }
         if ($source.id -like 'vc14-*') {
             Assert-MicrosoftSignature $path
             $vc14 += [pscustomobject]@{ path = $path; arch = $source.id.Split('-')[1] }
