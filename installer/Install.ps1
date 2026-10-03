@@ -278,7 +278,6 @@ function Invoke-Installation {
             }
             $installSteps += @{ log = $log; arguments = $arguments }
             $currentResult.after = ''
-            $currentResult.exitCode = 0
             foreach ($step in $installSteps) {
                 $log = $step.log
                 if ($interactive) {
@@ -286,7 +285,7 @@ function Invoke-Installation {
                     while (-not $process.WaitForExit(100)) { [Windows.Forms.Application]::DoEvents() }
                     $process.Refresh()
                 } else { $process = Start-Process -FilePath $executable -ArgumentList $step.arguments -Wait -PassThru }
-                if ($process.ExitCode -ne 0) { $currentResult.exitCode = $process.ExitCode }
+                if ($null -eq $currentResult.exitCode -or $process.ExitCode -ne 0) { $currentResult.exitCode = $process.ExitCode }
                 if ($process.ExitCode -notin @(0, 3010)) { throw "Ошибка установки $($package.id): $($process.ExitCode). Журнал: $log" }
                 if ($process.ExitCode -eq 3010) { $reboot = $true }
             }
