@@ -73,6 +73,16 @@ public static class RuntimeMsi {
         $version = [version] $Engine.ProductInfo($code, 'VersionString')
         if (-not $best -or $version -gt $best) { $best = $version }
     }
+    if ($best -and $Package.PSObject.Properties['runtimeFiles']) {
+        $folder = if ($Package.arch -eq 'x86' -and [Environment]::Is64BitOperatingSystem) { 'SysWOW64' } else { 'System32' }
+        $versions = foreach ($name in $Package.runtimeFiles) {
+            $path = Get-PayloadPath (Join-Path $env:SystemRoot $folder) $name
+            if (-not (Test-Path -LiteralPath $path)) { return [version]'0.0' }
+            $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($path)
+            [version]::new($info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart)
+        }
+        return ($versions | Sort-Object | Select-Object -First 1)
+    }
     $best
 }
 
@@ -222,7 +232,9 @@ function Invoke-Installation {
             if ($package.type -eq 'msi') {
                 $executable = "$env:SystemRoot\System32\msiexec.exe"
                 $arguments = "/i `"$path`" /qn /norestart /L*v `"$log`""
-                if ($action -eq 'repair') { $arguments += ' REINSTALL=ALL REINSTALLMODE=vomus' }
+                $sameMsi = $exact -and $package.PSObject.Properties['msiVersion'] -and
+                    [version] $engine.ProductInfo($package.productCode, 'VersionString') -eq [version] $package.msiVersion
+                if ($action -eq 'repair' -or $sameMsi) { $arguments += ' REINSTALL=ALL REINSTALLMODE=vomus' }
             } else {
                 $executable = $path
                 $operation = if ($action -eq 'repair') { '/repair' } else { '/install' }

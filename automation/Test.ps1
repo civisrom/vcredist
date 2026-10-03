@@ -60,6 +60,7 @@ Assert-Equal (Get-PackageAction ([version]'14.51.1') $null 'update' $false) 'ski
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'install' $true) 'skip' 'repeat installation'
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'repair' $true) 'repair' 'repair registered package'
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'repair' $false) 'skip' 'do not repair a different product with this MSI'
+Assert-Equal (Get-PackageAction ([version]'10.0.40219.473') ([version]'10.0.40219.325') 'install' $true) 'install' 'VC2010 DLL patch update despite identical MSI metadata'
 $selectionFixture = @(
     [pscustomobject]@{ id = 'vc14-x86'; type = 'msi'; family = '2026' },
     [pscustomobject]@{ id = 'vc14-x64'; type = 'msi'; family = '2026' },
@@ -73,6 +74,21 @@ Assert-Equal @(Select-Components $selectionFixture 'VC14,vc14').Count 2 'Duplica
 Assert-Throws { Select-Components $selectionFixture '' } 'empty component selection'
 Assert-Throws { Select-Components $selectionFixture 'vc14,unknown' } 'unknown component selection must fail before any installation'
 $temp = [IO.Path]::GetTempPath()
+$reportDirectory = Join-Path $temp ('runtime-report-test-' + [guid]::NewGuid().ToString('N'))
+try {
+    $result = New-InstallationResult ([pscustomobject]@{ id = '2010-x86'; name = 'Visual C++ 2010'; arch = 'x86'; version = '10.0.40219.473' })
+    $result.before = '10.0.40219.325'; $result.after = '10.0.40219.473'; $result.status = 'updated'; $result.exitCode = 3010
+    $pending = New-InstallationResult ([pscustomobject]@{ id = 'pending'; name = 'Unprocessed package'; arch = 'x64'; version = '1.0' })
+    Save-InstallationReport @($result, $pending) $reportDirectory $true 'A later package failed'
+    $report = Get-Content (Join-Path $reportDirectory 'report.json') -Raw | ConvertFrom-Json
+    Assert-Equal $report.success $false 'An incomplete installation must not be reported as successful'
+    Assert-Equal $report.rebootRequired $true 'Preserve a reboot request when a later package fails'
+    Assert-Equal $report.packages[0].before '10.0.40219.325' 'Preserve original installed version in report'
+    Assert-Equal $report.packages[0].after '10.0.40219.473' 'Preserve confirmed resulting version in report'
+    Assert-Equal $report.packages[1].status 'not-run' 'Do not claim installation of unprocessed packages'
+    Assert-Equal $report.packages[0].exitCode 3010 'Preserve the native installer exit code'
+    Assert-Equal ((Get-Content (Join-Path $reportDirectory 'report.txt') -Raw).Contains('10.0.40219.473')) $true 'Readable report retains the complete patch version'
+} finally { Remove-Item $reportDirectory -Recurse -Force }
 Assert-Throws { Get-PayloadPath $temp '../outside.exe' } 'path traversal'
 Assert-Throws { Get-PayloadPath $temp ([IO.Path]::GetFullPath($temp)) } 'absolute payload path'
 Assert-Equal (Get-PayloadPath $temp 'payload/file.msi') ([IO.Path]::GetFullPath((Join-Path $temp 'payload/file.msi'))) 'safe payload path'

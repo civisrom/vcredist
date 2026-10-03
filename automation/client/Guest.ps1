@@ -32,16 +32,21 @@ try {
     $env:PATH = "$env:ProgramFiles\7-Zip;$env:PATH"
     $env:VCR_DISPOSABLE_VM = $platform
     $env:ImageOS = $platform
+    $env:VCR_SCREENSHOT_DIRECTORY = "$share\screenshots"
     Set-Location $root
     if ($resumed) {
         & "$root\pwsh\pwsh.exe" -NoProfile -File "$root\automation\client\After-Reboot.ps1" | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Runtime verification after reboot failed.' }
+        & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$root\automation\Test-InteractiveInstall.ps1" -Installer "$root\.build\dist\Runtimes_AIO_x86_x64.exe" -ScreenshotDirectory "$share\screenshots\after-reboot" -Repeat | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'Interactive repeat after reboot failed.' }
         $success = $true
     } else {
         & "$root\pwsh\pwsh.exe" -NoProfile -File "$root\automation\Test.ps1" | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 tests failed.' }
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root\automation\Test.ps1" | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell tests failed.' }
+        & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "$root\automation\Test-Interface.ps1" -PayloadRoot "$root\installer" -ScreenshotDirectory "$share\screenshots\layout" | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'Client interface layout tests failed.' }
         & "$root\pwsh\pwsh.exe" -NoProfile -File "$root\automation\Smoke.ps1" -ClientWindows $platform | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Client lifecycle tests failed.' }
         Set-Content "$root\reboot-pending.txt" (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')

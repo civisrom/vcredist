@@ -30,6 +30,7 @@ $desktop = @($packages | Where-Object type -eq 'windowsdesktop')
 $msis = @($packages | Where-Object type -eq 'msi')
 $probes = Join-Path $work 'probes'
 $null = New-Item -ItemType Directory $probes -Force
+. "$PSScriptRoot/Test-MixedState.ps1"
 
 function Invoke-TestProcess([string] $File, [string] $Arguments, [int] $TimeoutSeconds = 600, [switch] $ExpectFailure) {
     Write-Host "RUN: $File $Arguments"
@@ -175,16 +176,30 @@ function Install-PreviousPatch {
 
 try {
     Invoke-TestProcess 'powershell.exe' "-NoProfile -STA -ExecutionPolicy Bypass -File `"$PSScriptRoot\Test-SelectionUi.ps1`" -PayloadRoot `"$payload`"" 120
+    $mixedState = if ($ClientWindows) { Install-MixedBaseline } else { $null }
     Register-TestSdk
     Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Mode check"
     Invoke-TestProcess $exe '/aiD /gm2' 120
-    Install-PreviousPatch
-    Invoke-TestProcess $exe '/ai /gm2' 900
+    if ($ClientWindows) {
+        Test-MixedUpdateOnly $mixedState
+        Invoke-TestProcess 'powershell.exe' "-NoProfile -STA -ExecutionPolicy Bypass -File `"$PSScriptRoot\Test-InteractiveInstall.ps1`" -Installer `"$exe`" -ScreenshotDirectory `"$env:VCR_SCREENSHOT_DIRECTORY\first-install`"" 1800
+        Assert-MixedUpgradeReport $mixedState
+    } else {
+        Install-PreviousPatch
+        Invoke-TestProcess $exe '/ai /gm2' 900
+    }
     Assert-Installed
     New-Probes
     Assert-Applications
     Invoke-TestProcess $exe '/ai /gm2' 900
     Assert-Installed
+    $repeat = Get-LatestInstallationReport
+    if (-not $repeat.data.success -or @($repeat.data.packages | Where-Object { $_.status -notin @('skipped', 'not-applicable') }).Count) {
+        throw 'Repeat installation did not skip all equal versions.'
+    }
+    Assert-NoPackageProcess $repeat
+    Write-Host 'PASS: repeated installation skipped every matching version without starting child installers'
+    if ($ClientWindows) { Test-RealOlderOffer $mixedState }
     # Force real repairs instead of accepting a successful no-op.
     $repairDesktop = $desktop | Where-Object arch -eq 'x86' | Sort-Object { [version] $_.version } | Select-Object -First 1
     $damaged = @(

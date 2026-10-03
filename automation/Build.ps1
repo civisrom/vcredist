@@ -165,6 +165,17 @@ foreach ($msi in Get-ChildItem $payload -Recurse -Filter '*.msi' | Sort-Object D
     $metadata['family'] = $parts[0]
     $metadata['arch'] = if ($parts[0] -eq 'vbc') { 'x86' } else { $parts[1] }
     $metadata['path'] = $relative
+    # VC++ 2010 .325 and .473 have the same MSI ProductVersion/ProductCode.
+    # Compare the actual shared DLL patch level and recache the MSI when updating.
+    if ($metadata.family -eq '2010') {
+        $systemFolder = if ($metadata.arch -eq 'x86') { 'Win/System' } else { 'Win/System64' }
+        $dlls = @(Get-ChildItem (Join-Path $msi.DirectoryName $systemFolder) -Filter '*.dll' -File)
+        $versions = @($dlls | ForEach-Object { $_.VersionInfo.FileVersionRaw.ToString() } | Select-Object -Unique)
+        if ($dlls.Count -lt 3 -or $versions.Count -ne 1) { throw 'Unexpected VC++ 2010 shared DLL versions.' }
+        $metadata['msiVersion'] = $metadata.version
+        $metadata['version'] = $versions[0]
+        $metadata['runtimeFiles'] = @($dlls.Name | Sort-Object)
+    }
     $packages.Add($metadata)
 }
 if ($packages.Count -ne 21) { throw "Expected 21 MSI packages, got $($packages.Count)" }

@@ -25,13 +25,13 @@ function Assert-Layout($Control) {
 function Save-Window($Window, [string] $Name) {
     $Window.PerformLayout()
     [Windows.Forms.Application]::DoEvents()
-    Assert-Layout $Window
-    if (-not $ScreenshotDirectory) { return }
+    if (-not $ScreenshotDirectory) { Assert-Layout $Window; return }
     $bitmap = New-Object Drawing.Bitmap($Window.Width, $Window.Height)
     try {
         $Window.DrawToBitmap($bitmap, (New-Object Drawing.Rectangle(0, 0, $bitmap.Width, $bitmap.Height)))
         $bitmap.Save((Join-Path $ScreenshotDirectory "$Name.png"), [Drawing.Imaging.ImageFormat]::Png)
     } finally { $bitmap.Dispose() }
+    Assert-Layout $Window
 }
 
 $packages = @()
@@ -93,7 +93,12 @@ try {
                 if ($scenario -eq 'selection') { $null = Show-PackageSelection $packages }
                 else {
                     $failure = if ($scenario -eq 'failure') { 'Ошибка установки компонента. Не удалось завершить обработку пакета; остальные выбранные компоненты не устанавливались.' } else { '' }
-                    Show-InstallationResult $rows $temp ($scenario -eq 'reboot') $failure
+                    $displayRows = @($rows | ForEach-Object { $_.PSObject.Copy() })
+                    if ($scenario -ne 'failure') {
+                        foreach ($row in $displayRows | Where-Object { $_.status -in @('failed', 'not-run') }) { $row.status = 'skipped' }
+                    }
+                    Save-InstallationReport $displayRows $temp ($scenario -eq 'reboot') $failure
+                    Show-InstallationResult $displayRows $temp ($scenario -eq 'reboot') $failure
                 }
                 if ($script:uiFailure) { throw $script:uiFailure }
                 if (-not $script:callbackRan) { throw 'The visual test did not run.' }

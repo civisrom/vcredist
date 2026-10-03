@@ -164,7 +164,7 @@ function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [b
     foreach ($status in @('installed', 'updated', 'repaired', 'skipped', 'not-selected', 'not-applicable', 'failed', 'not-run')) {
         $counts[$status] = @($Results | Where-Object status -eq $status).Count
     }
-    $heading = if ($Failure) { "Установка завершилась с ошибкой. $Failure" } else { 'Обработка выбранных библиотек завершена.' }
+    $heading = if ($Failure) { 'Установка завершилась с ошибкой. Подробности приведены ниже.' } else { 'Обработка выбранных библиотек завершена.' }
     $summary = "$heading`r`nУстановлено: $($counts.installed). Обновлено: $($counts.updated). Восстановлено: $($counts.repaired). Пропущено: $($counts.skipped + $counts.'not-selected' + $counts.'not-applicable'). Ошибок: $($counts.failed). Не выполнено: $($counts.'not-run')."
     if ($Reboot) { $summary += "`r`nДля завершения установки перезагрузите Windows." }
     $form.Tag.Layout.Controls.Add((New-RuntimeLabel 'ResultSummary' $summary), 0, 0)
@@ -176,6 +176,8 @@ function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [b
     $grid.AllowUserToDeleteRows = $false
     $grid.AllowUserToResizeRows = $false
     $grid.RowHeadersVisible = $false
+    $grid.SelectionMode = 'FullRowSelect'
+    $grid.MultiSelect = $false
     $grid.BackgroundColor = [Drawing.SystemColors]::Window
     $grid.BorderStyle = 'FixedSingle'
     $grid.AutoSizeRowsMode = 'AllCells'
@@ -184,7 +186,7 @@ function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [b
     $grid.ColumnHeadersDefaultCellStyle.WrapMode = 'True'
     $grid.ColumnHeadersHeightSizeMode = 'AutoSize'
     foreach ($column in @(
-        @('name', 'Компонент'), @('arch', 'Арх.'), @('versions', 'Версии'), @('outcome', 'Результат и подробности')
+        @('name', 'Компонент'), @('arch', 'Арх.'), @('versions', 'Версии'), @('outcome', 'Результат')
     )) {
         $null = $grid.Columns.Add($column[0], $column[1])
         $item = $grid.Columns[$column[0]]
@@ -196,10 +198,30 @@ function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [b
         $before = if ($result.before) { $result.before } else { '—' }
         $after = if ($result.after) { $result.after } else { '—' }
         $versions = "В пакете: $($result.available)`r`nДо: $before`r`nПосле: $after"
-        $outcome = (Get-ResultLabel $result.status) + "`r`n" + $result.reason
+        $outcome = Get-ResultLabel $result.status
         $null = $grid.Rows.Add([object[]] @($result.name, $result.arch, $versions, $outcome))
     }
     $form.Tag.Layout.Controls.Add($grid, 0, 1)
+    $form.Tag.Layout.RowCount = 4
+    $form.Tag.Layout.RowStyles[2].SizeType = 'Absolute'
+    $form.Tag.Layout.RowStyles[2].Height = 100
+    $null = $form.Tag.Layout.RowStyles.Add((New-Object Windows.Forms.RowStyle('AutoSize')))
+    $detail = New-Object Windows.Forms.TextBox
+    $detail.Name = 'ResultDetail'
+    $detail.ReadOnly = $true
+    $detail.Multiline = $true
+    $detail.WordWrap = $true
+    $detail.ScrollBars = 'Vertical'
+    $detail.Dock = 'Fill'
+    $detail.Margin = New-Object Windows.Forms.Padding(0, 10, 0, 0)
+    $detail.Text = $Failure
+    $grid.Add_SelectionChanged({
+        if ($grid.CurrentRow) {
+            $item = $Results[$grid.CurrentRow.Index]
+            $detail.Text = $(if ($Failure) { "$Failure`r`n" }) + $item.name + "`r`n" + $item.reason
+        }
+    })
+    $form.Tag.Layout.Controls.Add($detail, 0, 2)
     $buttons = New-RuntimeButtons
     $report = New-RuntimeButton 'OpenReport' 'Открыть отчёт'
     $report.Enabled = Test-Path (Join-Path $LogDirectory 'report.txt')
@@ -210,7 +232,7 @@ function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [b
     $close = New-RuntimeButton 'CloseResult' 'Закрыть'
     $close.DialogResult = 'OK'
     $buttons.Controls.AddRange(@($report, $logs, $close))
-    $form.Tag.Layout.Controls.Add($buttons, 0, 2)
+    $form.Tag.Layout.Controls.Add($buttons, 0, 3)
     $form.AcceptButton = $close
     $form.CancelButton = $close
     try { $null = $form.ShowDialog() } finally { $form.Dispose() }
