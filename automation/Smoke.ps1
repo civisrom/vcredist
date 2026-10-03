@@ -208,7 +208,20 @@ try {
         if (@(Get-DesktopBundles $package).Count) { throw "Bundle was not removed: $($package.id)" }
         Write-Host "PASS: bundle removed $($package.id); remaining shared runtime: $(Get-DesktopVersion $package)"
         foreach ($other in $desktop | Where-Object id -ne $package.id) { Invoke-DesktopProbe $other }
-        Invoke-TestProcess $path '/install /quiet /norestart'
+        if ($package.id -eq $desktop[0].id) {
+            Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Components dotnet-$($package.channel) -Mode repair -Quiet" 900
+            $latest = Get-ChildItem "$env:ProgramData\civisrom\VisualCppRedist\logs" -Directory | Sort-Object Name -Descending | Select-Object -First 1
+            $logs = @(Get-ChildItem $latest.FullName -File | Where-Object Name -ne 'installer.log')
+            if (@($logs | Where-Object Name -NotLike "windowsdesktop-$($package.channel)-*.log").Count) {
+                throw 'Selective Desktop repair ran an unselected package.'
+            }
+            foreach ($arch in @('x86', 'x64')) {
+                if (-not (Test-Path (Join-Path $latest.FullName "windowsdesktop-$($package.channel)-$arch.log"))) {
+                    throw "Selected Desktop architecture was not processed: $arch"
+                }
+            }
+            Write-Host "PASS: selected Desktop $($package.channel) only, x86 and x64"
+        } else { Invoke-TestProcess $path '/install /quiet /norestart' }
         Invoke-DesktopProbe $package
     }
 
