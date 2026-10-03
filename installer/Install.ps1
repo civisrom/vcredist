@@ -77,9 +77,11 @@ public static class RuntimeMsi {
         $folder = if ($Package.arch -eq 'x86' -and [Environment]::Is64BitOperatingSystem) { 'SysWOW64' } else { 'System32' }
         $versions = foreach ($name in $Package.runtimeFiles) {
             $path = Get-PayloadPath (Join-Path $env:SystemRoot $folder) $name
-            if (-not (Test-Path -LiteralPath $path)) { return [version]'0.0' }
-            $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($path)
-            [version]::new($info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart)
+            if (-not (Test-Path -LiteralPath $path)) { [version]'0.0' }
+            else {
+                $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($path)
+                [version]::new($info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart)
+            }
         }
         return ($versions | Sort-Object | Select-Object -First 1)
     }
