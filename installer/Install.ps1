@@ -44,16 +44,15 @@ function Show-PackageSelection([object[]] $Packages) {
     $list.Name = 'ComponentList'
     $list.SetBounds(16, 80, 528, 332)
     $list.CheckOnClick = $true
-    $ids = @()
-    foreach ($group in $Packages | Group-Object { Get-ComponentId $_ }) {
-        $ids += $group.Name
-        $label = switch ($group.Name) {
+    $ids = @($Packages | ForEach-Object { Get-ComponentId $_ } | Select-Object -Unique)
+    foreach ($id in $ids) {
+        $label = switch ($id) {
             'vc14' { 'Visual C++ 2015–2026 (v14)' }
             'vbc' { 'Старые Visual Basic / Visual C++ 2002–2003' }
             'vstor' { 'Visual Studio Tools for Office Runtime' }
             default {
-                if ($group.Name -like 'dotnet-*') { ".NET Windows Desktop Runtime $($group.Name.Substring(7))" }
-                else { "Visual C++ $($group.Name.Substring(2))" }
+                if ($id -like 'dotnet-*') { ".NET Windows Desktop Runtime $($id.Substring(7))" }
+                else { "Visual C++ $($id.Substring(2))" }
             }
         }
         $null = $list.Items.Add($label, $true)

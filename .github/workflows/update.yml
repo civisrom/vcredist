@@ -54,6 +54,8 @@ jobs:
           ./automation/Test.ps1
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./automation/Test.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell 5.1 tests failed.' }
+          powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./automation/Test-SelectionUi.ps1 -PayloadRoot ./installer
+          if ($LASTEXITCODE -ne 0) { throw 'Package selection dialog tests failed.' }
       - name: Проверка Microsoft и сборка полного набора
         id: build
         env:
