@@ -25,8 +25,9 @@ function Click-Button($Window, [string[]] $Titles) {
 
 $scenarios = if ($Repeat) { @('install') } else { @('help', 'cancel', 'install') }
 foreach ($scenario in $scenarios) {
-    $arguments = if ($scenario -eq 'help') { '/?' } else { '/y' }
-    $process = Start-Process $Installer -ArgumentList $arguments -PassThru
+    # /y suppresses the extraction cancellation prompt; exercise the normal launch.
+    $process = if ($scenario -eq 'help') { Start-Process $Installer -ArgumentList '/?' -PassThru }
+        else { Start-Process $Installer -PassThru }
     $deadline = [DateTime]::UtcNow.AddMinutes(25)
     $seen = @{}
     $lastDetail = ''
