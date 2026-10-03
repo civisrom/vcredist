@@ -26,6 +26,10 @@ public static class RuntimeWindowProbe {
     [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr window, IntPtr context, uint flags);
+    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr window);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr window, IntPtr context);
+    [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr context, IntPtr value);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int DrawText(IntPtr context, string text, int count, ref Rect rectangle, uint format);
 
     private static RuntimeWindow Describe(IntPtr window) {
         var text = new StringBuilder(4096);
@@ -72,10 +76,23 @@ public static class RuntimeWindowProbe {
             if (!(kind.Contains("static") || kind.Contains("button") || kind.Contains("richedit"))) continue;
             if (!window.Bounds.Contains(child.Bounds)) throw new Exception("Control outside window: " + child.Title);
             IntPtr handle = SendMessage(child.Handle, 0x0031, IntPtr.Zero, IntPtr.Zero);
-            using (var font = handle == IntPtr.Zero ? (Font)SystemFonts.MessageBoxFont.Clone() : Font.FromHfont(handle)) {
-                var measured = TextRenderer.MeasureText(child.Title, font,
-                    new Size(Math.Max(1, child.Bounds.Width - 6), Int32.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
-                if (measured.Height > child.Bounds.Height + 3) throw new Exception("Clipped control text: " + child.Title);
+            // SFX dialogs also use raster fonts, which Font.FromHfont cannot represent.
+            // Measure with the actual native font rather than substituting a TrueType font.
+            IntPtr dc = GetDC(child.Handle);
+            if (dc == IntPtr.Zero) throw new Exception("Cannot measure control: " + child.Title);
+            IntPtr previous = IntPtr.Zero;
+            try {
+                if (handle != IntPtr.Zero) previous = SelectObject(dc, handle);
+                var measured = new Rect { Right = Math.Max(1, child.Bounds.Width - 6) };
+                uint flags = 0x0400 | 0x0010; // DT_CALCRECT | DT_WORDBREAK
+                if (!kind.Contains("button")) flags |= 0x0800; // DT_NOPREFIX
+                if (DrawText(dc, child.Title, child.Title.Length, ref measured, flags) == 0)
+                    throw new Exception("Cannot measure control text: " + child.Title);
+                if (measured.Bottom > child.Bounds.Height + 3 || measured.Right > child.Bounds.Width)
+                    throw new Exception("Clipped control text: " + child.Title);
+            } finally {
+                if (previous != IntPtr.Zero) SelectObject(dc, previous);
+                ReleaseDC(child.Handle, dc);
             }
         }
     }

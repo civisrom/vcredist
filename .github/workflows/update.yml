@@ -66,6 +66,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Package selection dialog tests failed.' }
       - name: Размещение текста и окна при разных размерах шрифта
         run: |
+          powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./automation/Test-WindowProbe.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Native font measurement tests failed.' }
           powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./automation/Test-Interface.ps1 -PayloadRoot ./installer -ScreenshotDirectory "$env:RUNNER_TEMP/interface-screenshots"
           if ($LASTEXITCODE -ne 0) { throw 'Interface layout tests failed.' }
       - name: Зашифровать снимки для локальной проверки
