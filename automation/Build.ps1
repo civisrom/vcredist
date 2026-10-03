@@ -153,7 +153,7 @@ foreach ($arch in @('x86', 'x64')) {
 
 $null = New-Item -ItemType Directory -Path (Join-Path $payload 'dotnet')
 foreach ($package in $desktopPackages) { Copy-Item (Join-Path $downloads "$($package.id).exe") (Join-Path $payload $package.path) }
-Copy-Item "$root/installer/Installer.cmd", "$root/installer/Install.ps1" $payload
+Copy-Item "$root/installer/Installer.cmd", "$root/installer/Install.ps1", "$root/installer/Interface.ps1" $payload
 $packages = [Collections.Generic.List[object]]::new()
 foreach ($msi in Get-ChildItem $payload -Recurse -Filter '*.msi' | Sort-Object DirectoryName, @{ Expression = { if ($_.Name -like '*Additional*') { 1 } else { 0 } } }, Name) {
     $relative = $msi.FullName.Substring($payload.Length + 1).Replace('\', '/')

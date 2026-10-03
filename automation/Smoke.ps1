@@ -211,7 +211,7 @@ try {
         if ($package.id -eq $desktop[0].id) {
             Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Components dotnet-$($package.channel) -Mode repair -Quiet" 900
             $latest = Get-ChildItem "$env:ProgramData\civisrom\VisualCppRedist\logs" -Directory | Sort-Object Name -Descending | Select-Object -First 1
-            $logs = @(Get-ChildItem $latest.FullName -File | Where-Object Name -ne 'installer.log')
+            $logs = @(Get-ChildItem $latest.FullName -Filter '*.log' -File | Where-Object Name -ne 'installer.log')
             if (@($logs | Where-Object Name -NotLike "windowsdesktop-$($package.channel)-*.log").Count) {
                 throw 'Selective Desktop repair ran an unselected package.'
             }
@@ -264,7 +264,7 @@ try {
         $manifest | ConvertTo-Json -Depth 12 | Set-Content $manifestPath -Encoding utf8
         Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Quiet"
         $latest = Get-ChildItem "$env:ProgramData\civisrom\VisualCppRedist\logs" -Directory | Sort-Object Name -Descending | Select-Object -First 1
-        if (@(Get-ChildItem $latest.FullName -File | Where-Object Name -ne 'installer.log').Count) { throw 'Downgrade attempted to run a package.' }
+        if (@(Get-ChildItem $latest.FullName -Filter '*.log' -File | Where-Object Name -ne 'installer.log').Count) { throw 'Downgrade attempted to run a package.' }
     } finally { [IO.File]::WriteAllBytes($manifestPath, $originalManifest) }
     $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
     $packages = @($manifest.packages | Where-Object { $_.family -ne 'vstor' -or $_.arch -eq 'x64' })

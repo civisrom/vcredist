@@ -20,19 +20,19 @@ foreach ($scenario in @('cancel', 'select')) {
         $window = [Windows.Forms.Application]::OpenForms[0]
         try {
             if (-not $window -or -not $window.Visible) { throw 'The package selection dialog did not open.' }
-            $list = $window.Controls['ComponentList']
+            $list = $window.Controls.Find('ComponentList', $true)[0]
             if ($list.Items.Count -ne 2 -or $list.CheckedItems.Count -ne 2) { throw 'Expected two checked components.' }
             if ($scenario -eq 'cancel') {
-                $window.Controls['CancelSelection'].PerformClick()
+                $window.Controls.Find('CancelSelection', $true)[0].PerformClick()
             } else {
-                $window.Controls['ClearSelection'].PerformClick()
+                $window.Controls.Find('ClearSelection', $true)[0].PerformClick()
                 if ($list.CheckedItems.Count -ne 0) { throw 'Clear selection failed.' }
-                $window.Controls['SelectAll'].PerformClick()
+                $window.Controls.Find('SelectAll', $true)[0].PerformClick()
                 if ($list.CheckedItems.Count -ne 2) { throw 'Select all failed.' }
-                $window.Controls['ClearSelection'].PerformClick()
+                $window.Controls.Find('ClearSelection', $true)[0].PerformClick()
                 $list.SetItemChecked(0, $true)
                 if ($list.CheckedItems.Count -ne 1) { throw 'Individual selection failed.' }
-                $window.Controls['InstallSelected'].PerformClick()
+                $window.Controls.Find('InstallSelected', $true)[0].PerformClick()
             }
         } catch {
             $script:uiFailure = $_

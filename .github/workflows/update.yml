@@ -9,6 +9,14 @@ on:
         description: 'Собрать заново, даже если такой набор уже есть'
         type: boolean
         default: false
+      screenshot_certificate:
+        description: 'Публичный PEM-сертификат для зашифрованной передачи снимков на локальную проверку'
+        type: string
+        default: ''
+      interface_only:
+        description: 'Проверить только логику и окна, без сборки установочного пакета'
+        type: boolean
+        default: false
   push:
     branches: [master, 'automation/**']
     paths: ['automation/**', 'installer/**', 'build_tools/**', '.github/workflows/**']
@@ -56,7 +64,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell 5.1 tests failed.' }
           powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./automation/Test-SelectionUi.ps1 -PayloadRoot ./installer
           if ($LASTEXITCODE -ne 0) { throw 'Package selection dialog tests failed.' }
+      - name: Размещение текста и окна при разных размерах шрифта
+        run: |
+          powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./automation/Test-Interface.ps1 -PayloadRoot ./installer -ScreenshotDirectory "$env:RUNNER_TEMP/interface-screenshots"
+          if ($LASTEXITCODE -ne 0) { throw 'Interface layout tests failed.' }
+      - name: Зашифровать снимки для локальной проверки
+        if: always() && inputs.screenshot_certificate != ''
+        env:
+          SCREENSHOT_CERTIFICATE: ${{ inputs.screenshot_certificate }}
+        run: ./automation/Export-Screenshots.ps1 -Directory "$env:RUNNER_TEMP/interface-screenshots" -Output "$env:RUNNER_TEMP/interface-screenshots.p7m"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
+        if: always() && inputs.screenshot_certificate != ''
+        with:
+          name: encrypted-ui-build-${{ github.run_id }}
+          path: ${{ runner.temp }}/interface-screenshots.p7m
+          if-no-files-found: error
+          retention-days: 1
       - name: Проверка Microsoft и сборка полного набора
+        if: ${{ !inputs.interface_only }}
         id: build
         env:
           GH_TOKEN: ${{ github.token }}
@@ -106,6 +131,7 @@ jobs:
     with:
       artifact: unverified-${{ github.run_id }}-${{ github.run_attempt }}
       run_id: ${{ github.run_id }}
+      screenshot_certificate: ${{ inputs.screenshot_certificate || '' }}
 
   verified:
     needs: [build, lifecycle, client]

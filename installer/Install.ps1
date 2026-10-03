@@ -26,69 +26,7 @@ function Select-Components([object[]] $Packages, [string] $Selection) {
     @($Packages | Where-Object { (Get-ComponentId $_) -in $ids })
 }
 
-function Show-PackageSelection([object[]] $Packages) {
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-    [Windows.Forms.Application]::EnableVisualStyles()
-    $form = New-Object Windows.Forms.Form
-    $form.Text = 'Выбор библиотек — Runtimes AIO'
-    $form.ClientSize = New-Object Drawing.Size(560, 480)
-    $form.StartPosition = 'CenterScreen'
-    $form.FormBorderStyle = 'FixedDialog'
-    $form.MaximizeBox = $false
-    $form.Font = New-Object Drawing.Font('Segoe UI', 10)
-    $description = New-Object Windows.Forms.Label
-    $description.SetBounds(16, 12, 528, 64)
-    $description.Text = "Выберите библиотеки для установки. Более новые версии сохранятся.`r`nНа 64-битной Windows устанавливаются варианты x86 и x64."
-    $list = New-Object Windows.Forms.CheckedListBox
-    $list.Name = 'ComponentList'
-    $list.SetBounds(16, 80, 528, 332)
-    $list.CheckOnClick = $true
-    $ids = @($Packages | ForEach-Object { Get-ComponentId $_ } | Select-Object -Unique)
-    foreach ($id in $ids) {
-        $label = switch ($id) {
-            'vc14' { 'Visual C++ 2015–2026 (v14)' }
-            'vbc' { 'Старые Visual Basic / Visual C++ 2002–2003' }
-            'vstor' { 'Visual Studio Tools for Office Runtime' }
-            default {
-                if ($id -like 'dotnet-*') { ".NET Windows Desktop Runtime $($id.Substring(7))" }
-                else { "Visual C++ $($id.Substring(2))" }
-            }
-        }
-        $null = $list.Items.Add($label, $true)
-    }
-    $all = New-Object Windows.Forms.Button
-    $all.Name = 'SelectAll'
-    $all.Text = 'Выбрать всё'
-    $all.SetBounds(16, 432, 120, 32)
-    $all.Add_Click({ for ($i = 0; $i -lt $list.Items.Count; $i++) { $list.SetItemChecked($i, $true) } })
-    $none = New-Object Windows.Forms.Button
-    $none.Name = 'ClearSelection'
-    $none.Text = 'Снять выбор'
-    $none.SetBounds(144, 432, 120, 32)
-    $none.Add_Click({ for ($i = 0; $i -lt $list.Items.Count; $i++) { $list.SetItemChecked($i, $false) } })
-    $install = New-Object Windows.Forms.Button
-    $install.Name = 'InstallSelected'
-    $install.Text = 'Установить'
-    $install.SetBounds(304, 432, 120, 32)
-    $install.Add_Click({
-        if ($list.CheckedIndices.Count -eq 0) { [Windows.Forms.MessageBox]::Show('Выберите хотя бы один компонент.', $form.Text) | Out-Null; return }
-        $form.DialogResult = 'OK'
-        $form.Close()
-    })
-    $cancel = New-Object Windows.Forms.Button
-    $cancel.Name = 'CancelSelection'
-    $cancel.Text = 'Отмена'
-    $cancel.SetBounds(432, 432, 112, 32)
-    $cancel.DialogResult = 'Cancel'
-    $form.CancelButton = $cancel
-    $form.AcceptButton = $install
-    $form.Controls.AddRange(@($description, $list, $all, $none, $install, $cancel))
-    try {
-        if ($form.ShowDialog() -ne 'OK') { return $null }
-        (@($list.CheckedIndices | ForEach-Object { $ids[$_] }) -join ',')
-    } finally { $form.Dispose() }
-}
+. "$PSScriptRoot/Interface.ps1"
 
 function Get-PackageAction([version] $Available, [version] $Installed, [string] $Mode, [bool] $ExactProduct) {
     if ($Installed -and $Installed -gt $Available) { return 'skip' }
@@ -156,56 +94,129 @@ function Get-DesktopVersion($Package) {
     ($versions | Sort-Object)[0]
 }
 
+function Get-SkipReason([version] $Available, [version] $Installed, [string] $Mode) {
+    if ($Installed -and $Installed -gt $Available) { return 'Уже установлена более новая версия.' }
+    if ($Mode -eq 'update' -and -not $Installed) { return 'Компонент отсутствует; режим обновления не добавляет новые компоненты.' }
+    'Такая версия уже установлена; повторная установка не требуется.'
+}
+
+function New-InstallationResult($Package) {
+    [pscustomobject][ordered]@{
+        id = $Package.id; name = $Package.name; arch = $Package.arch
+        available = $Package.version; before = ''; after = ''
+        status = 'not-run'; reason = 'Установка ещё не выполнялась.'; exitCode = $null
+    }
+}
+
+function Save-InstallationReport([object[]] $Results, [string] $Directory, [bool] $Reboot, [string] $Failure) {
+    $null = New-Item -ItemType Directory -Path $Directory -Force
+    $report = [ordered]@{
+        schema = 1; completedAt = [DateTime]::Now.ToString('o'); mode = $Mode
+        success = (-not $Failure); rebootRequired = $Reboot; error = $Failure; packages = @($Results)
+    }
+    $report | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Directory 'report.json') -Encoding UTF8
+    $lines = @('Runtimes AIO — результат установки', "Дата: $($report.completedAt)", "Режим: $Mode")
+    if ($Failure) { $lines += "Ошибка: $Failure" }
+    if ($Reboot) { $lines += 'Для завершения установки требуется перезагрузка Windows.' }
+    foreach ($item in $Results) {
+        $before = if ($item.before) { $item.before } else { 'не установлено' }
+        $after = if ($item.after) { $item.after } else { 'не подтверждено' }
+        $lines += @('', "$($item.name) [$($item.arch)] — $(Get-ResultLabel $item.status)",
+            "В пакете: $($item.available); до: $before; после: $after.", $item.reason)
+    }
+    $lines | Set-Content (Join-Path $Directory 'report.txt') -Encoding UTF8
+}
+
 function Invoke-Installation {
-    if ([Environment]::OSVersion.Platform -ne 'Win32NT' -or [Environment]::OSVersion.Version.Major -lt 10) {
-        throw 'Требуется Windows 10/11.'
-    }
-    if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') {
-        throw 'Этот пакет предназначен для Windows x86/x64.'
-    }
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-    if ($Mode -ne 'check' -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw 'Запустите установщик от имени администратора.'
-    }
-    $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') -Raw | ConvertFrom-Json
-    if ($manifest.schema -ne 1) { throw 'Неизвестный формат manifest.json.' }
-    # Verify the entire payload before changing the system.
-    foreach ($file in $manifest.files) {
-        $path = Get-PayloadPath $PSScriptRoot $file.path
-        if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $file.sha256) {
-            throw "Повреждён файл: $($file.path)"
-        }
-    }
-    $arch = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
-    $packages = @($manifest.packages | Where-Object {
-        if ($_.family -eq 'vstor') { $_.arch -eq $arch }
-        else { $_.arch -eq 'x86' -or $_.arch -eq $arch }
-    })
-    if ($SelectPackages -and ($Quiet -or $Components -or $Mode -ne 'install')) {
-        throw 'Окно выбора используется только для обычной установки без -Quiet и -Components.'
-    }
-    if ($SelectPackages) {
-        $Components = Show-PackageSelection $packages
-        if (-not $Components) { Write-Host 'Установка отменена.'; return 0 }
-    }
-    if ($Components) {
-        $packages = @(Select-Components $packages $Components)
-    }
-    $engine = New-Object -ComObject WindowsInstaller.Installer
+    $interactive = -not $Quiet -and $Mode -ne 'check' -and [Environment]::OSVersion.Platform -eq 'Win32NT'
+    $progress = $null
+    $engine = $null
+    $transcribing = $false
+    $cancelled = $false
     $reboot = $false
+    $failure = ''
+    $exitCode = 0
+    $currentResult = $null
+    $results = New-Object 'Collections.Generic.List[object]'
     $logDir = Join-Path $env:ProgramData ('civisrom\VisualCppRedist\logs\' + [DateTime]::Now.ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N'))
     try {
+        if ([Environment]::OSVersion.Platform -ne 'Win32NT' -or [Environment]::OSVersion.Version.Major -lt 10) {
+            throw 'Требуется Windows 10/11.'
+        }
+        if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') {
+            throw 'Этот пакет предназначен для Windows x86/x64.'
+        }
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+        if ($Mode -ne 'check' -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw 'Запустите установщик от имени администратора.'
+        }
+        if ($SelectPackages -and ($Quiet -or $Components -or $Mode -ne 'install')) {
+            throw 'Окно выбора используется только для обычной установки без -Quiet и -Components.'
+        }
+        $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') -Raw | ConvertFrom-Json
+        if ($manifest.schema -ne 1) { throw 'Неизвестный формат manifest.json.' }
+        if ($interactive) { $progress = New-InstallationProgress }
+        $verified = 0
+        # Verify the entire payload before changing the system.
+        foreach ($file in $manifest.files) {
+            Set-InstallationProgress $progress 'Проверка файлов' "Проверяется целостность установочного пакета.`r`nФайл: $($file.path)" $verified $manifest.files.Count
+            $path = Get-PayloadPath $PSScriptRoot $file.path
+            if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $file.sha256) { throw "Повреждён файл: $($file.path)" }
+            $verified++
+        }
+        if ($progress) { $progress.Dispose(); $progress = $null }
+        $arch = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
+        $packages = @($manifest.packages | Where-Object {
+            if ($_.family -eq 'vstor') { $_.arch -eq $arch }
+            else { $_.arch -eq 'x86' -or $_.arch -eq $arch }
+        })
+        if ($SelectPackages) {
+            $Components = Show-PackageSelection $packages
+            if (-not $Components) { $cancelled = $true; Write-Host 'Установка отменена.'; return 0 }
+        }
+        $selected = if ($Components) { @(Select-Components $packages $Components) } else { $packages }
         if ($Mode -ne 'check') {
             $null = New-Item -ItemType Directory -Path $logDir -Force
             $null = Start-Transcript -Path (Join-Path $logDir 'installer.log')
+            $transcribing = $true
         }
-        foreach ($package in $packages) {
+        if ($interactive) { $progress = New-InstallationProgress }
+        $engine = New-Object -ComObject WindowsInstaller.Installer
+        $byId = @{}
+        foreach ($package in $manifest.packages) {
+            $item = New-InstallationResult $package
+            $results.Add($item)
+            $byId[$package.id] = $item
+            if ($package.id -notin $packages.id) {
+                $item.status = 'not-applicable'
+                $item.reason = "Для этой системы используется другой вариант архитектуры ($arch)."
+                continue
+            }
+            Set-InstallationProgress $progress 'Проверка установленных версий' "$($package.name)`r`nАрхитектура: $($package.arch). Версия в пакете: $($package.version)."
+            $installed = Get-InstalledVersion $engine $package
+            $item.before = if ($installed -eq [version]'0.0') { 'Неполный набор' } elseif ($installed) { "$installed" } else { '' }
+            $item.after = $item.before
+            if ($package.id -notin $selected.id) { $item.status = 'not-selected'; $item.reason = 'Компонент не выбран пользователем.' }
+        }
+        $completed = 0
+        foreach ($package in $selected) {
+            $currentResult = $byId[$package.id]
+            # Re-read after each installation: bundles can change shared components.
             $installed = Get-InstalledVersion $engine $package
             $exact = if ($package.type -eq 'msi') { $engine.ProductState($package.productCode) -eq 5 } else { $true }
             $action = Get-PackageAction ([version] $package.version) $installed $Mode $exact
             Write-Host "$($package.name) [$($package.arch)] $($package.version): $action"
-            if ($Mode -eq 'check' -or $action -eq 'skip') { continue }
+            if ($Mode -eq 'check') { continue }
+            if ($action -eq 'skip') {
+                $currentResult.status = 'skipped'
+                $currentResult.reason = Get-SkipReason ([version] $package.version) $installed $Mode
+                $currentResult.after = if ($installed) { "$installed" } else { '' }
+                $completed++
+                continue
+            }
+            $operationText = if ($action -eq 'repair') { 'Восстановление' } elseif ($installed) { 'Обновление' } else { 'Установка' }
+            Set-InstallationProgress $progress "$operationText — компонент $($completed + 1) из $($selected.Count)" "$($package.name)`r`nАрхитектура: $($package.arch). Версия: $($package.version).`r`nДождитесь завершения обработки компонента." $completed $selected.Count
             $path = Get-PayloadPath $PSScriptRoot $package.path
             $log = Join-Path $logDir ($package.id + '.log')
             if ($package.type -eq 'msi') {
@@ -217,23 +228,46 @@ function Invoke-Installation {
                 $operation = if ($action -eq 'repair') { '/repair' } else { '/install' }
                 $arguments = "$operation /quiet /norestart /log `"$log`""
             }
-            $process = Start-Process -FilePath $executable -ArgumentList $arguments -Wait -PassThru
-            if ($process.ExitCode -notin @(0, 3010)) {
-                throw "Ошибка установки $($package.id): $($process.ExitCode). Журнал: $log"
-            }
+            $currentResult.after = ''
+            if ($interactive) {
+                $process = Start-Process -FilePath $executable -ArgumentList $arguments -PassThru
+                while (-not $process.WaitForExit(100)) { [Windows.Forms.Application]::DoEvents() }
+                $process.Refresh()
+            } else { $process = Start-Process -FilePath $executable -ArgumentList $arguments -Wait -PassThru }
+            $currentResult.exitCode = $process.ExitCode
+            if ($process.ExitCode -notin @(0, 3010)) { throw "Ошибка установки $($package.id): $($process.ExitCode). Журнал: $log" }
             if ($process.ExitCode -eq 3010) { $reboot = $true }
             $actual = Get-InstalledVersion $engine $package
-            if (-not $actual -or $actual -lt [version] $package.version) {
-                throw "Windows Installer не подтвердил установку $($package.id). Журнал: $log"
-            }
+            $currentResult.after = if ($actual) { "$actual" } else { '' }
+            if (-not $actual -or $actual -lt [version] $package.version) { throw "Не подтверждена установка $($package.id). Журнал: $log" }
+            $currentResult.status = if ($action -eq 'repair') { 'repaired' } elseif ($installed) { 'updated' } else { 'installed' }
+            $currentResult.reason = if ($action -eq 'repair') { 'Компонент восстановлен; версия проверена.' } else { 'Установка завершена; версия проверена.' }
+            $completed++
         }
-        if ($Mode -ne 'check') { Write-Host "Установка завершена. Журналы: $logDir" }
-        if ($reboot) { Write-Host 'Для завершения требуется перезагрузка.'; return 3010 }
-        return 0
+        if ($Mode -ne 'check') { Write-Host "Установка завершена. Отчёт и журналы: $logDir" }
+        if ($reboot) { Write-Host 'Для завершения требуется перезагрузка.'; $exitCode = 3010 }
+    } catch {
+        $failure = $_.Exception.Message
+        $exitCode = 1
+        if ($currentResult -and $currentResult.status -eq 'not-run') {
+            $currentResult.status = 'failed'
+            $currentResult.reason = $failure
+            try { $actual = Get-InstalledVersion $engine $package; $currentResult.after = if ($actual) { "$actual" } else { '' } }
+            catch { $currentResult.after = '' }
+        }
+        foreach ($item in $results | Where-Object status -eq 'not-run') { $item.reason = 'Не выполнено из-за предыдущей ошибки.' }
+        Write-Error ("$_`n" + $_.ScriptStackTrace) -ErrorAction Continue
     } finally {
-        if ($Mode -ne 'check') { $null = Stop-Transcript }
-        $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine)
+        if ($progress) { $progress.Dispose() }
+        if ($engine) { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine) }
+        if ($transcribing) { $null = Stop-Transcript }
+        if ($Mode -ne 'check' -and -not $cancelled) {
+            try { Save-InstallationReport $results.ToArray() $logDir $reboot $failure }
+            catch { $failure += " Не удалось сохранить отчёт: $($_.Exception.Message)"; $exitCode = 1; Write-Error $failure -ErrorAction Continue }
+            if ($interactive) { Show-InstallationResult $results.ToArray() $logDir $reboot $failure }
+        }
     }
+    $exitCode
 }
 
 if ($MyInvocation.InvocationName -ne '.') {

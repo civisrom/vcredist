@@ -9,6 +9,9 @@ on:
       run_id:
         required: true
         type: string
+      screenshot_certificate:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -38,3 +41,16 @@ jobs:
         env:
           CLIENT_OS: ${{ matrix.os }}
         run: bash automation/client/Run.sh
+      - name: Зашифровать снимки клиентской Windows
+        if: always() && inputs.screenshot_certificate != ''
+        shell: pwsh
+        env:
+          SCREENSHOT_CERTIFICATE: ${{ inputs.screenshot_certificate }}
+        run: ./automation/Export-Screenshots.ps1 -Directory "$env:RUNNER_TEMP/client-windows/shared/screenshots" -Output "$env:RUNNER_TEMP/client-screenshots.p7m"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
+        if: always() && inputs.screenshot_certificate != ''
+        with:
+          name: encrypted-ui-${{ matrix.os }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/client-screenshots.p7m
+          if-no-files-found: error
+          retention-days: 1

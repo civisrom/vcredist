@@ -1,0 +1,217 @@
+﻿function Get-ComponentLabel([string] $Id) {
+    switch ($Id) {
+        'vc14' { 'Visual C++ 2015–2026 (v14)' }
+        'vbc' { 'Visual Basic / Visual C++ 2002–2003' }
+        'vstor' { 'Visual Studio Tools for Office Runtime' }
+        default {
+            if ($Id -like 'dotnet-*') { ".NET Windows Desktop Runtime $($Id.Substring(7))" }
+            else { "Visual C++ $($Id.Substring(2))" }
+        }
+    }
+}
+
+function Get-ResultLabel([string] $Status) {
+    switch ($Status) {
+        'installed' { 'Установлено' }
+        'updated' { 'Обновлено' }
+        'repaired' { 'Восстановлено' }
+        'skipped' { 'Пропущено' }
+        'not-selected' { 'Не выбрано' }
+        'not-applicable' { 'Не требуется' }
+        'failed' { 'Ошибка' }
+        default { 'Не выполнено' }
+    }
+}
+
+function New-RuntimeWindow([string] $Title, [int] $Width, [int] $Height) {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [Windows.Forms.Application]::EnableVisualStyles()
+    $form = New-Object Windows.Forms.Form
+    $form.SuspendLayout()
+    $form.Text = "$Title — Runtimes AIO"
+    $form.Font = New-Object Drawing.Font('Segoe UI', 10)
+    $form.AutoScaleDimensions = New-Object Drawing.SizeF(96, 96)
+    $form.AutoScaleMode = 'Dpi'
+    $area = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $form.ClientSize = New-Object Drawing.Size([Math]::Min($Width, $area.Width - 64), [Math]::Min($Height, $area.Height - 80))
+    $form.MinimumSize = New-Object Drawing.Size(680, 400)
+    $form.StartPosition = 'CenterScreen'
+    $layout = New-Object Windows.Forms.TableLayoutPanel
+    $layout.Name = 'WindowLayout'
+    $layout.Dock = 'Fill'
+    $layout.Padding = New-Object Windows.Forms.Padding(18)
+    $layout.ColumnCount = 1
+    $layout.RowCount = 3
+    $null = $layout.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle('Percent', 100)))
+    $null = $layout.RowStyles.Add((New-Object Windows.Forms.RowStyle('AutoSize')))
+    $null = $layout.RowStyles.Add((New-Object Windows.Forms.RowStyle('Percent', 100)))
+    $null = $layout.RowStyles.Add((New-Object Windows.Forms.RowStyle('AutoSize')))
+    $form.Controls.Add($layout)
+    $form.Tag = @{ Layout = $layout }
+    $form.ResumeLayout($true)
+    $form
+}
+
+function New-RuntimeLabel([string] $Name, [string] $Text) {
+    $label = New-Object Windows.Forms.Label
+    $label.Name = $Name
+    $label.Text = $Text
+    $label.UseMnemonic = $false
+    $label.AutoSize = $true
+    $label.Dock = 'Fill'
+    $label.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 14)
+    $label
+}
+
+function New-RuntimeButtons {
+    $panel = New-Object Windows.Forms.FlowLayoutPanel
+    $panel.AutoSize = $true
+    $panel.Dock = 'Fill'
+    $panel.WrapContents = $true
+    $panel.Margin = New-Object Windows.Forms.Padding(0, 12, 0, 0)
+    $panel
+}
+
+function New-RuntimeButton([string] $Name, [string] $Text) {
+    $button = New-Object Windows.Forms.Button
+    $button.Name = $Name
+    $button.Text = $Text
+    $button.AutoSize = $true
+    $button.MinimumSize = New-Object Drawing.Size(120, 36)
+    $button.Padding = New-Object Windows.Forms.Padding(8, 3, 8, 3)
+    $button.Margin = New-Object Windows.Forms.Padding(0, 0, 10, 0)
+    $button
+}
+
+function Show-PackageSelection([object[]] $Packages) {
+    $form = New-RuntimeWindow 'Выбор библиотек' 760 560
+    $layout = $form.Tag.Layout
+    $description = New-RuntimeLabel 'SelectionDescription' "Выберите библиотеки для установки. Уже установленные такие же или более новые версии будут сохранены.`r`nНа Windows x64 устанавливаются библиотеки обеих архитектур; для VSTO — только x64."
+    $layout.Controls.Add($description, 0, 0)
+    $list = New-Object Windows.Forms.CheckedListBox
+    $list.Name = 'ComponentList'
+    $list.Dock = 'Fill'
+    $list.IntegralHeight = $false
+    $list.CheckOnClick = $true
+    $list.HorizontalScrollbar = $true
+    $ids = @($Packages | ForEach-Object { Get-ComponentId $_ } | Select-Object -Unique)
+    foreach ($id in $ids) { $null = $list.Items.Add((Get-ComponentLabel $id), $true) }
+    $layout.Controls.Add($list, 0, 1)
+    $buttons = New-RuntimeButtons
+    $all = New-RuntimeButton 'SelectAll' 'Выбрать всё'
+    $all.Add_Click({ for ($i = 0; $i -lt $list.Items.Count; $i++) { $list.SetItemChecked($i, $true) } })
+    $none = New-RuntimeButton 'ClearSelection' 'Снять выбор'
+    $none.Add_Click({ for ($i = 0; $i -lt $list.Items.Count; $i++) { $list.SetItemChecked($i, $false) } })
+    $install = New-RuntimeButton 'InstallSelected' 'Установить'
+    $install.Add_Click({
+        if ($list.CheckedIndices.Count -eq 0) { return }
+        $form.DialogResult = 'OK'
+        $form.Close()
+    })
+    $list.Add_ItemCheck({ $install.Enabled = ($list.CheckedItems.Count + $(if ($_.NewValue -eq 'Checked') { 1 } else { -1 })) -gt 0 })
+    $cancel = New-RuntimeButton 'CancelSelection' 'Отмена'
+    $cancel.DialogResult = 'Cancel'
+    $buttons.Controls.AddRange(@($all, $none, $install, $cancel))
+    $layout.Controls.Add($buttons, 0, 2)
+    $form.CancelButton = $cancel
+    $form.AcceptButton = $install
+    try {
+        if ($form.ShowDialog() -ne 'OK') { return $null }
+        (@($list.CheckedIndices | ForEach-Object { $ids[$_] }) -join ',')
+    } finally { $form.Dispose() }
+}
+
+function New-InstallationProgress {
+    $form = New-RuntimeWindow 'Установка библиотек' 760 400
+    $form.ControlBox = $false
+    $form.Add_FormClosing({ if ($_.CloseReason -eq 'UserClosing') { $_.Cancel = $true } })
+    $heading = New-RuntimeLabel 'ProgressHeading' 'Подготовка установки'
+    $heading.Font = New-Object Drawing.Font('Segoe UI', 13, [Drawing.FontStyle]::Bold)
+    $detail = New-RuntimeLabel 'ProgressDetail' 'Проверка файлов и установленных версий...'
+    $detail.TextAlign = 'MiddleLeft'
+    $bar = New-Object Windows.Forms.ProgressBar
+    $bar.Name = 'InstallationProgress'
+    $bar.Dock = 'Fill'
+    $bar.Height = 26
+    $bar.Style = 'Marquee'
+    $form.Tag.Layout.Controls.Add($heading, 0, 0)
+    $form.Tag.Layout.Controls.Add($detail, 0, 1)
+    $form.Tag.Layout.Controls.Add($bar, 0, 2)
+    $form.Tag.Heading = $heading
+    $form.Tag.Detail = $detail
+    $form.Tag.Bar = $bar
+    $form.Show()
+    [Windows.Forms.Application]::DoEvents()
+    $form
+}
+
+function Set-InstallationProgress($Window, [string] $Heading, [string] $Detail, [int] $Completed = 0, [int] $Total = 0) {
+    if (-not $Window) { return }
+    $Window.Tag.Heading.Text = $Heading
+    $Window.Tag.Detail.Text = $Detail
+    if ($Total -gt 0) {
+        $Window.Tag.Bar.Style = 'Continuous'
+        $Window.Tag.Bar.Maximum = $Total
+        $Window.Tag.Bar.Value = [Math]::Min($Completed, $Total)
+    }
+    [Windows.Forms.Application]::DoEvents()
+}
+
+function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [bool] $Reboot, [string] $Failure) {
+    $form = New-RuntimeWindow 'Результат установки' 1120 680
+    $counts = @{}
+    foreach ($status in @('installed', 'updated', 'repaired', 'skipped', 'not-selected', 'not-applicable', 'failed', 'not-run')) {
+        $counts[$status] = @($Results | Where-Object status -eq $status).Count
+    }
+    $heading = if ($Failure) { "Установка завершилась с ошибкой. $Failure" } else { 'Обработка выбранных библиотек завершена.' }
+    $summary = "$heading`r`nУстановлено: $($counts.installed). Обновлено: $($counts.updated). Восстановлено: $($counts.repaired). Пропущено: $($counts.skipped + $counts.'not-selected' + $counts.'not-applicable'). Ошибок: $($counts.failed). Не выполнено: $($counts.'not-run')."
+    if ($Reboot) { $summary += "`r`nДля завершения установки перезагрузите Windows." }
+    $form.Tag.Layout.Controls.Add((New-RuntimeLabel 'ResultSummary' $summary), 0, 0)
+    $grid = New-Object Windows.Forms.DataGridView
+    $grid.Name = 'ResultTable'
+    $grid.Dock = 'Fill'
+    $grid.ReadOnly = $true
+    $grid.AllowUserToAddRows = $false
+    $grid.AllowUserToDeleteRows = $false
+    $grid.AllowUserToResizeRows = $false
+    $grid.RowHeadersVisible = $false
+    $grid.BackgroundColor = [Drawing.SystemColors]::Window
+    $grid.BorderStyle = 'FixedSingle'
+    $grid.AutoSizeRowsMode = 'AllCells'
+    $grid.DefaultCellStyle.WrapMode = 'True'
+    $grid.DefaultCellStyle.Padding = New-Object Windows.Forms.Padding(4)
+    $grid.ColumnHeadersDefaultCellStyle.WrapMode = 'True'
+    $grid.ColumnHeadersHeightSizeMode = 'AutoSize'
+    foreach ($column in @(
+        @('name', 'Компонент'), @('arch', 'Арх.'), @('versions', 'Версии'), @('outcome', 'Результат и подробности')
+    )) {
+        $null = $grid.Columns.Add($column[0], $column[1])
+        $item = $grid.Columns[$column[0]]
+        $item.SortMode = 'NotSortable'
+        if ($column[0] -ne 'arch') { $item.AutoSizeMode = 'Fill'; $item.MinimumWidth = 170 }
+        else { $item.AutoSizeMode = 'AllCells' }
+    }
+    foreach ($result in $Results) {
+        $before = if ($result.before) { $result.before } else { '—' }
+        $after = if ($result.after) { $result.after } else { '—' }
+        $versions = "В пакете: $($result.available)`r`nДо: $before`r`nПосле: $after"
+        $outcome = (Get-ResultLabel $result.status) + "`r`n" + $result.reason
+        $null = $grid.Rows.Add([object[]] @($result.name, $result.arch, $versions, $outcome))
+    }
+    $form.Tag.Layout.Controls.Add($grid, 0, 1)
+    $buttons = New-RuntimeButtons
+    $report = New-RuntimeButton 'OpenReport' 'Открыть отчёт'
+    $report.Enabled = Test-Path (Join-Path $LogDirectory 'report.txt')
+    $report.Add_Click({ Start-Process notepad.exe -ArgumentList ('"' + (Join-Path $LogDirectory 'report.txt') + '"') })
+    $logs = New-RuntimeButton 'OpenLogs' 'Открыть журналы'
+    $logs.Enabled = Test-Path $LogDirectory
+    $logs.Add_Click({ Start-Process explorer.exe -ArgumentList ('"' + $LogDirectory + '"') })
+    $close = New-RuntimeButton 'CloseResult' 'Закрыть'
+    $close.DialogResult = 'OK'
+    $buttons.Controls.AddRange(@($report, $logs, $close))
+    $form.Tag.Layout.Controls.Add($buttons, 0, 2)
+    $form.AcceptButton = $close
+    $form.CancelButton = $close
+    try { $null = $form.ShowDialog() } finally { $form.Dispose() }
+}
