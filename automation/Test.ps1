@@ -14,6 +14,10 @@ function Assert-Throws([scriptblock] $Action, [string] $Message) {
 }
 
 foreach ($path in Get-ChildItem (Split-Path $PSScriptRoot) -Filter '*.ps1' -Recurse | Where-Object { $_.FullName -notmatch '[/\\]\.build[/\\]' }) {
+    if ([IO.File]::ReadAllText($path.FullName) -match '[^\x00-\x7F]') {
+        $bytes = [IO.File]::ReadAllBytes($path.FullName)
+        Assert-Equal ([BitConverter]::ToString($bytes, 0, 3)) 'EF-BB-BF' "UTF-8 BOM required by Windows PowerShell 5.1: $($path.Name)"
+    }
     $tokens = $null; $errors = $null
     $null = [Management.Automation.Language.Parser]::ParseFile($path.FullName, [ref] $tokens, [ref] $errors)
     if ($errors) { throw "$($path.Name): $errors" }

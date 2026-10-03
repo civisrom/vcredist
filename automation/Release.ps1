@@ -1,4 +1,4 @@
-param([string] $Directory = (Join-Path (Split-Path $PSScriptRoot) 'dist'), [switch] $Preview)
+﻿param([string] $Directory = (Join-Path (Split-Path $PSScriptRoot) 'dist'), [switch] $Preview)
 . "$PSScriptRoot/Common.ps1"
 $manifest = Get-Content (Join-Path $Directory 'manifest.json') -Raw | ConvertFrom-Json
 if ($manifest.fingerprint -notmatch '^[a-f0-9]{64}$') { throw 'Invalid release fingerprint.' }

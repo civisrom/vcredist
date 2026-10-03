@@ -28,6 +28,8 @@ printf '%s\n' "$CLIENT_OS" > "$work/shared/platform.txt"
 cp "$root/automation/client/Guest.ps1" "$work/oem/Guest.ps1"
 printf '@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\\OEM\\Guest.ps1\r\n' > "$work/oem/install.bat"
 
+# Invoked by the EXIT trap.
+# shellcheck disable=SC2329
 cleanup() {
   if [[ -n "${log_pid:-}" ]]; then kill "$log_pid" 2>/dev/null || true; fi
   docker logs runtime-windows --tail 80 || true
