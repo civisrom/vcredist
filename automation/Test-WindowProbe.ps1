@@ -60,6 +60,32 @@ try {
             } finally { $null = [NativeTextFixture]::DestroyWindow($control) }
         }
     }
+    foreach ($controlType in @('Label', 'Button')) {
+        foreach ($compatible in @($false, $true)) {
+            $control = New-Object "Windows.Forms.$controlType"
+            $control.Text = 'WinForms draws this text with its own font, not SYSTEM_FONT.'
+            $control.Font = New-Object Drawing.Font('Segoe UI', 10)
+            $control.UseCompatibleTextRendering = $compatible
+            $control.Location = New-Object Drawing.Point(10, 10)
+            $control.Width = 550
+            $form.Controls.Add($control)
+            try {
+                $preferred = $control.GetPreferredSize((New-Object Drawing.Size($control.Width, 0)))
+                foreach ($height in @($preferred.Height, 4)) {
+                    $control.Height = $height
+                    [Windows.Forms.Application]::DoEvents()
+                    $clipped = $false
+                    try { [RuntimeWindowProbe]::AssertTextFits($window) }
+                    catch {
+                        if ($_.Exception.ToString() -notlike '*Clipped control text:*') { throw }
+                        $clipped = $true
+                    }
+                    if ($clipped -ne ($height -eq 4)) { throw "Incorrect WinForms measurement: $controlType, compatible $compatible, height $height" }
+                    Write-Host "PASS: WinForms text measurement, $controlType, compatible $compatible, height $height"
+                }
+            } finally { $control.Dispose() }
+        }
+    }
 } finally { $form.Dispose() }
 
 foreach ($height in @(120, 4)) {

@@ -78,7 +78,21 @@ public static class RuntimeWindowProbe {
             string kind = child.ClassName.ToLowerInvariant();
             if (!(kind.Contains("static") || kind.Contains("button") || kind.Contains("richedit"))) continue;
             if (!window.Bounds.Contains(child.Bounds)) throw new Exception("Control outside window: " + child.Title);
+            Control managed = Control.FromHandle(child.Handle);
+            if (managed is Label || managed is Button) {
+                // Owner-painted WinForms controls do not expose their font through
+                // WM_GETFONT. In-process tests can use their actual layout engine.
+                Size preferred = managed.GetPreferredSize(new Size(managed.Width, 0));
+                if (preferred.Height > managed.Height + 1 ||
+                    (managed is Button && managed.GetPreferredSize(Size.Empty).Width > managed.Width + 1))
+                    throw new Exception("Clipped control text: " + child.Title + " (WinForms preferred " + preferred + ", control " + managed.Size + ")");
+                continue;
+            }
             IntPtr handle = SendMessage(child.Handle, 0x0031, IntPtr.Zero, IntPtr.Zero);
+            // In a different process these owner-painted controls expose geometry,
+            // but not text metrics. Test-Interface checks them in-process at four
+            // font sizes; Test-InteractiveInstall also captures every real stage.
+            if (handle == IntPtr.Zero && kind.StartsWith("windowsforms")) continue;
             // SFX dialogs also use raster fonts, which Font.FromHfont cannot represent.
             // Measure with the actual native font rather than substituting a TrueType font.
             IntPtr dc = GetDC(child.Handle);

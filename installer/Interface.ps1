@@ -58,7 +58,6 @@ function New-RuntimeLabel([string] $Name, [string] $Text) {
     $label = New-Object Windows.Forms.Label
     $label.Name = $Name
     $label.Text = $Text
-    $label.UseCompatibleTextRendering = $false
     $label.UseMnemonic = $false
     $label.AutoSize = $true
     $label.Dock = 'Fill'
@@ -79,7 +78,6 @@ function New-RuntimeButton([string] $Name, [string] $Text) {
     $button = New-Object Windows.Forms.Button
     $button.Name = $Name
     $button.Text = $Text
-    $button.UseCompatibleTextRendering = $false
     $button.AutoSize = $true
     $button.MinimumSize = New-Object Drawing.Size(120, 36)
     $button.Padding = New-Object Windows.Forms.Padding(8, 3, 8, 3)
