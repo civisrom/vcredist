@@ -85,6 +85,7 @@ public static class RuntimeWindowProbe {
             if (dc == IntPtr.Zero) throw new Exception("Cannot measure control: " + child.Title);
             IntPtr previous = IntPtr.Zero;
             IntPtr localFont = IntPtr.Zero;
+            string fontDescription = "default SYSTEM_FONT (WM_GETFONT returned zero)";
             try {
                 if (handle != IntPtr.Zero) {
                     // A font handle from WM_GETFONT belongs to the other process.
@@ -92,6 +93,7 @@ public static class RuntimeWindowProbe {
                     var description = new byte[92]; // LOGFONTW
                     if (GetObject(handle, description.Length, description) == 0)
                         throw new Exception("Cannot read control font: " + child.Title);
+                    fontDescription = Encoding.Unicode.GetString(description, 28, 64).TrimEnd('\0') + ", height " + BitConverter.ToInt32(description, 0);
                     localFont = CreateFontIndirect(description);
                     if (localFont == IntPtr.Zero) throw new Exception("Cannot create measurement font.");
                     previous = SelectObject(dc, localFont);
@@ -103,7 +105,7 @@ public static class RuntimeWindowProbe {
                 if (DrawText(dc, child.Title, child.Title.Length, ref measured, flags) == 0)
                     throw new Exception("Cannot measure control text: " + child.Title);
                 if (measured.Bottom > child.Bounds.Height + 3 || measured.Right > child.Bounds.Width)
-                    throw new Exception("Clipped control text: " + child.Title + " (measured " + measured.Right + "x" + measured.Bottom + ", control " + child.Bounds.Size + ")");
+                    throw new Exception("Clipped control text: " + child.Title + " (measured " + measured.Right + "x" + measured.Bottom + ", control " + child.Bounds.Size + ", font " + fontDescription + ", class " + child.ClassName + ")");
             } finally {
                 if (previous != IntPtr.Zero) SelectObject(dc, previous);
                 if (localFont != IntPtr.Zero) DeleteObject(localFont);

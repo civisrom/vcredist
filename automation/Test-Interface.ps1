@@ -28,13 +28,14 @@ function Save-Window($Window, [string] $Name) {
     [Windows.Forms.Application]::DoEvents()
     $native = [RuntimeWindowProbe]::Windows([IntPtr]::Zero) | Where-Object Handle -eq $Window.Handle
     if (-not $native) { throw 'The tested window is not visible.' }
+    if ($ScreenshotDirectory) {
+        $bitmap = New-Object Drawing.Bitmap($Window.Width, $Window.Height)
+        try {
+            $Window.DrawToBitmap($bitmap, (New-Object Drawing.Rectangle(0, 0, $bitmap.Width, $bitmap.Height)))
+            $bitmap.Save((Join-Path $ScreenshotDirectory "$Name.png"), [Drawing.Imaging.ImageFormat]::Png)
+        } finally { $bitmap.Dispose() }
+    }
     [RuntimeWindowProbe]::AssertTextFits($native)
-    if (-not $ScreenshotDirectory) { Assert-Layout $Window; return }
-    $bitmap = New-Object Drawing.Bitmap($Window.Width, $Window.Height)
-    try {
-        $Window.DrawToBitmap($bitmap, (New-Object Drawing.Rectangle(0, 0, $bitmap.Width, $bitmap.Height)))
-        $bitmap.Save((Join-Path $ScreenshotDirectory "$Name.png"), [Drawing.Imaging.ImageFormat]::Png)
-    } finally { $bitmap.Dispose() }
     Assert-Layout $Window
 }
 
