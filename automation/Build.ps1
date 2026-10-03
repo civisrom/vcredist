@@ -159,10 +159,12 @@ $packages = [Collections.Generic.List[object]]::new()
 foreach ($msi in Get-ChildItem $payload -Recurse -Filter '*.msi' | Sort-Object DirectoryName, @{ Expression = { if ($_.Name -like '*Additional*') { 1 } else { 0 } } }, Name) {
     $relative = $msi.FullName.Substring($payload.Length + 1).Replace('\', '/')
     $parts = $relative.Split('/')
-    $metadata = Get-MsiMetadata $msi.FullName
     # Repacked MSI files must not reuse Microsoft's package identity: otherwise
     # Windows Installer can select the cached original (notably VC2010 .325).
-    $metadata['packageCode'] = Reset-MsiPackageCode $msi.FullName
+    # Update before reading tables, whose COM views can keep the file open.
+    $packageCode = Reset-MsiPackageCode $msi.FullName
+    $metadata = Get-MsiMetadata $msi.FullName
+    $metadata['packageCode'] = $packageCode
     Write-Host "MSI $relative`: $($metadata.version), upgrade $($metadata.upgradeCode)"
     $metadata['id'] = $relative.Replace('/', '-').Replace('.msi', '')
     $metadata['type'] = 'msi'
