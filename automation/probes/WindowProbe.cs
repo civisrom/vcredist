@@ -83,7 +83,7 @@ public static class RuntimeWindowProbe {
             IntPtr previous = IntPtr.Zero;
             try {
                 if (handle != IntPtr.Zero) previous = SelectObject(dc, handle);
-                var measured = new Rect { Right = Math.Max(1, child.Bounds.Width - 6) };
+                var measured = new Rect { Right = Math.Max(1, child.Bounds.Width - (kind.Contains("button") ? 6 : 0)) };
                 uint flags = 0x0400 | 0x0010; // DT_CALCRECT | DT_WORDBREAK
                 if (!kind.Contains("button")) flags |= 0x0800; // DT_NOPREFIX
                 if (DrawText(dc, child.Title, child.Title.Length, ref measured, flags) == 0)

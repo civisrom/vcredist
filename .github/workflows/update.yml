@@ -70,6 +70,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native font measurement tests failed.' }
           powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./automation/Test-Interface.ps1 -PayloadRoot ./installer -ScreenshotDirectory "$env:RUNNER_TEMP/interface-screenshots"
           if ($LASTEXITCODE -ne 0) { throw 'Interface layout tests failed.' }
+      - name: Проверка Microsoft и сборка полного набора
+        if: ${{ !inputs.interface_only }}
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_BUILD: ${{ inputs.force_build || false }}
+        run: ./automation/Build.ps1 -Force:($env:FORCE_BUILD -eq 'true')
+      - name: Окна справки, распаковки и отмены готового EXE
+        if: steps.build.outputs.changed == 'true'
+        run: |
+          powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./automation/Test-InteractiveInstall.ps1 -Installer ./.build/dist/Runtimes_AIO_x86_x64.exe -ScreenshotDirectory "$env:RUNNER_TEMP/interface-screenshots/sfx" -DialogsOnly
+          if ($LASTEXITCODE -ne 0) { throw 'SFX dialog tests failed.' }
       - name: Зашифровать снимки для локальной проверки
         if: always() && inputs.screenshot_certificate != ''
         env:
@@ -82,13 +94,6 @@ jobs:
           path: ${{ runner.temp }}/interface-screenshots.p7m
           if-no-files-found: error
           retention-days: 1
-      - name: Проверка Microsoft и сборка полного набора
-        if: ${{ !inputs.interface_only }}
-        id: build
-        env:
-          GH_TOKEN: ${{ github.token }}
-          FORCE_BUILD: ${{ inputs.force_build || false }}
-        run: ./automation/Build.ps1 -Force:($env:FORCE_BUILD -eq 'true')
       - name: Временный пакет для тестовых машин
         if: steps.build.outputs.changed == 'true'
         id: candidate

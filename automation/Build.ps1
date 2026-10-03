@@ -202,9 +202,11 @@ Push-Location $payload
 try { Invoke-Checked $sevenZip @('a', $archive, '.', '-t7z', '-mqs', '-mx=9', '-m0=BCJ2', '-m1=LZMA:d26', '-m2=LZMA:d19', '-m3=LZMA:d19', '-mb0:1', '-mb0s1:2', '-mb0s2:3', '-ms=on', '-mmt=2', '-bso0') }
 finally { Pop-Location }
 $exe = Join-Path $dist 'Runtimes_AIO_x86_x64.exe'
+$sfx = Join-Path $work 'runtime-layout.sfx'
+& "$PSScriptRoot/Prepare-Sfx.ps1" -Source "$root/build_tools/_AIO/7zSfxMod.sfx" -Destination $sfx
 $output = [IO.File]::Create($exe)
 try {
-    foreach ($part in @("$root/build_tools/_AIO/7zSfxMod.sfx", "$root/installer/7zSfxConfig.txt", $archive)) {
+    foreach ($part in @($sfx, "$root/installer/7zSfxConfig.txt", $archive)) {
         $inputStream = [IO.File]::OpenRead($part)
         try { $inputStream.CopyTo($output) } finally { $inputStream.Dispose() }
     }

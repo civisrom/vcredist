@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory)] [string] $Installer, [Parameter(Mandatory)] [string] $ScreenshotDirectory, [switch] $Repeat)
+﻿param([Parameter(Mandatory)] [string] $Installer, [Parameter(Mandatory)] [string] $ScreenshotDirectory, [switch] $Repeat, [switch] $DialogsOnly)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 Add-Type -AssemblyName System.Windows.Forms
@@ -23,7 +23,7 @@ function Click-Button($Window, [string[]] $Titles) {
     [RuntimeWindowProbe]::Click($button[0].Handle)
 }
 
-$scenarios = if ($Repeat) { @('install') } else { @('help', 'cancel', 'install') }
+$scenarios = if ($DialogsOnly) { @('help', 'cancel') } elseif ($Repeat) { @('install') } else { @('help', 'cancel', 'install') }
 foreach ($scenario in $scenarios) {
     # /y suppresses the extraction cancellation prompt; exercise the normal launch.
     $process = if ($scenario -eq 'help') { Start-Process $Installer -ArgumentList '/?' -PassThru }
