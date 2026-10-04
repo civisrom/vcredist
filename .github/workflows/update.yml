@@ -2,7 +2,7 @@ name: Microsoft Runtimes AIO
 
 on:
   schedule:
-    - cron: '23 6 1 * *'
+    - cron: '23 6 1,16 * *'
   workflow_dispatch:
     inputs:
       force_build:
