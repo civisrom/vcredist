@@ -184,6 +184,11 @@ function Invoke-Installation {
         if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') {
             throw 'Этот пакет предназначен для Windows x86/x64.'
         }
+        # A 32-bit process is redirected to SysWOW64 and Program Files (x86),
+        # so the x64 libraries would be detected by their x86 files.
+        if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+            throw 'Запустите Installer.cmd или 64-разрядный PowerShell: из 32-разрядного процесса версии x64 определяются неверно.'
+        }
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
         $principal = [Security.Principal.WindowsPrincipal]::new($identity)
         if ($Mode -ne 'check' -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {

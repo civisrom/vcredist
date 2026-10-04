@@ -65,6 +65,30 @@ Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'insta
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'repair' $true) 'repair' 'repair registered package'
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.51.1') 'repair' $false) 'skip' 'do not repair a different product with this MSI'
 Assert-Equal (Get-PackageAction ([version]'10.0.40219.473') ([version]'10.0.40219.325') 'install' $true) 'install' 'VC2010 DLL patch update despite identical MSI metadata'
+# Every mode against every detected state: absent, incomplete, older, equal, newer.
+$lifecycleStates = @($null, [version]'0.0', [version]'8.0.30', [version]'8.0.31', [version]'8.0.32')
+$lifecycleExpected = @{
+    install = 'install,install,install,skip,skip'
+    update = 'skip,install,install,skip,skip'
+    repair = 'install,install,install,repair,skip'
+}
+foreach ($mode in $lifecycleExpected.Keys) {
+    $actions = foreach ($state in $lifecycleStates) { Get-PackageAction ([version]'8.0.31') $state $mode $true }
+    Assert-Equal ($actions -join ',') $lifecycleExpected[$mode] "Lifecycle decisions in $mode mode"
+}
+$newerReason = Get-SkipReason ([version]'8.0.31') ([version]'8.0.32') 'install'
+$equalReason = Get-SkipReason ([version]'8.0.31') ([version]'8.0.31') 'install'
+$absentReason = Get-SkipReason ([version]'8.0.31') $null 'update'
+Assert-Equal (@($newerReason, $equalReason, $absentReason | Select-Object -Unique).Count) 3 'Each skip cause has its own explanation'
+foreach ($mode in @('update', 'repair')) {
+    Assert-Equal (Get-SkipReason ([version]'8.0.31') ([version]'8.0.32') $mode) $newerReason "A newer version is reported as newer in $mode mode"
+}
+Assert-Equal (Get-SkipReason ([version]'8.0.31') ([version]'8.0.31') 'update') $equalReason 'An equal version in update mode is not reported as absent'
+$componentFixture = @('2005', '2008', '2010', '2012', '2013', '2026', 'vbc', 'vstor' | ForEach-Object { [pscustomobject]@{ type = 'msi'; family = $_ } })
+$componentFixture += [pscustomobject]@{ type = 'windowsdesktop'; family = 'windowsdesktop'; channel = '10.0' }
+$componentIds = @($componentFixture | ForEach-Object { Get-ComponentId $_ })
+Assert-Equal ($componentIds -join ',') 'vc2005,vc2008,vc2010,vc2012,vc2013,vc14,vbc,vstor,dotnet-10.0' 'Documented component identifiers'
+Assert-Equal (@($componentIds | ForEach-Object { Get-ComponentLabel $_ } | Where-Object { $_ } | Select-Object -Unique).Count) $componentIds.Count 'Every component has its own label in the selection window'
 $patchEngine = New-Object psobject
 $patchEngine | Add-Member ScriptMethod Patches { param($code) @('known-obsolete-patch', 'unrelated-patch') }
 $patchedPackage = [pscustomobject]@{ productCode = 'product'; supersededPatches = @('known-obsolete-patch', 'absent-patch') }
@@ -113,6 +137,13 @@ try {
     $result.exitCode = 3010
     Complete-InstallationResult $result ([version]'10.0.40219.473') ([version]'10.0.40219.473') 'repair' 'test.log'
     Assert-Equal $result.status 'repaired' 'A confirmed repair can still request a reboot'
+    $fresh = New-InstallationResult ([pscustomobject]@{ id = 'fresh'; name = 'Fresh package'; arch = 'x64'; version = '8.0.31' })
+    Assert-Throws { Complete-InstallationResult $fresh $null $null 'install' 'test.log' } 'A package that never started must not be reported as pending a reboot'
+    $fresh.exitCode = 0
+    Complete-InstallationResult $fresh ([version]'8.0.31') $null 'install' 'test.log'
+    Assert-Equal $fresh.status 'installed' 'A previously absent package is installed, not updated'
+    Complete-InstallationResult $fresh ([version]'8.0.32') ([version]'0.0') 'install' 'test.log'
+    Assert-Equal "$($fresh.status) $($fresh.after)" 'updated 8.0.32' 'Completing an incomplete set is an update and keeps a newer detected version'
 } finally { Remove-Item $reportDirectory -Recurse -Force }
 Assert-Throws { Get-PayloadPath $temp '../outside.exe' } 'path traversal'
 Assert-Throws { Get-PayloadPath $temp ([IO.Path]::GetFullPath($temp)) } 'absolute payload path'
