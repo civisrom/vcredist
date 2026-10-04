@@ -20,6 +20,8 @@ function Get-ResultLabel([string] $Status) {
         'not-selected' { 'Не выбрано' }
         'not-applicable' { 'Не требуется' }
         'failed' { 'Ошибка' }
+        'planned-install' { 'Будет установлено' }
+        'planned-update' { 'Будет обновлено' }
         default { 'Не выполнено' }
     }
 }
@@ -85,7 +87,7 @@ function New-RuntimeButton([string] $Name, [string] $Text) {
     $button
 }
 
-function Show-PackageSelection([object[]] $Packages) {
+function Show-PackageSelection([object[]] $Packages, [hashtable] $States = @{}) {
     $form = New-RuntimeWindow 'Выбор библиотек' 760 560
     $layout = $form.Tag.Layout
     $description = New-RuntimeLabel 'SelectionDescription' "Выберите библиотеки для установки. Уже установленные такие же или более новые версии будут сохранены.`r`nНа Windows x64 устанавливаются библиотеки обеих архитектур; для VSTO — только x64."
@@ -97,7 +99,11 @@ function Show-PackageSelection([object[]] $Packages) {
     $list.CheckOnClick = $true
     $list.HorizontalScrollbar = $true
     $ids = @($Packages | ForEach-Object { Get-ComponentId $_ } | Select-Object -Unique)
-    foreach ($id in $ids) { $null = $list.Items.Add((Get-ComponentLabel $id), $true) }
+    foreach ($id in $ids) {
+        $label = Get-ComponentLabel $id
+        if ($States[$id]) { $label += " — $($States[$id])" }
+        $null = $list.Items.Add($label, $true)
+    }
     $layout.Controls.Add($list, 0, 1)
     $buttons = New-RuntimeButtons
     $all = New-RuntimeButton 'SelectAll' 'Выбрать всё'
@@ -159,14 +165,21 @@ function Set-InstallationProgress($Window, [string] $Heading, [string] $Detail, 
     [Windows.Forms.Application]::DoEvents()
 }
 
-function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [bool] $Reboot, [string] $Failure) {
-    $form = New-RuntimeWindow 'Результат установки' 1120 680
+# With -Plan the same window lists what a normal installation would do.
+function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [bool] $Reboot, [string] $Failure, [switch] $Plan) {
+    $form = New-RuntimeWindow $(if ($Plan) { 'Проверка состава' } else { 'Результат установки' }) 1120 680
     $counts = @{}
-    foreach ($status in @('installed', 'updated', 'repaired', 'pending-reboot', 'skipped', 'not-selected', 'not-applicable', 'failed', 'not-run')) {
+    foreach ($status in @('installed', 'updated', 'repaired', 'pending-reboot', 'skipped', 'not-selected', 'not-applicable', 'failed', 'not-run', 'planned-install', 'planned-update')) {
         $counts[$status] = @($Results | Where-Object status -eq $status).Count
     }
-    $heading = if ($Failure) { 'Установка завершилась с ошибкой. Подробности приведены ниже.' } else { 'Обработка выбранных библиотек завершена.' }
-    $summary = "$heading`r`nУстановлено: $($counts.installed). Обновлено: $($counts.updated). Восстановлено: $($counts.repaired). Пропущено: $($counts.skipped + $counts.'not-selected' + $counts.'not-applicable'). Ошибок: $($counts.failed). Не выполнено: $($counts.'not-run')."
+    $unchanged = $counts.skipped + $counts.'not-selected' + $counts.'not-applicable'
+    if ($Plan) {
+        $heading = if ($Failure) { 'Проверка завершилась с ошибкой. Подробности приведены ниже.' } else { 'Файлы пакета исправны. Система не изменялась.' }
+        $summary = "$heading`r`nБудет установлено: $($counts.'planned-install'). Будет обновлено: $($counts.'planned-update'). Без изменений: $unchanged."
+    } else {
+        $heading = if ($Failure) { 'Установка завершилась с ошибкой. Подробности приведены ниже.' } else { 'Обработка выбранных библиотек завершена.' }
+        $summary = "$heading`r`nУстановлено: $($counts.installed). Обновлено: $($counts.updated). Восстановлено: $($counts.repaired). Пропущено: $unchanged. Ошибок: $($counts.failed). Не выполнено: $($counts.'not-run')."
+    }
     if ($Reboot) { $summary += "`r`nДля завершения установки перезагрузите Windows. Ожидают перезагрузки: $($counts.'pending-reboot')." }
     $form.Tag.Layout.Controls.Add((New-RuntimeLabel 'ResultSummary' $summary), 0, 0)
     $grid = New-Object Windows.Forms.DataGridView
@@ -187,7 +200,7 @@ function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [b
     $grid.ColumnHeadersDefaultCellStyle.WrapMode = 'True'
     $grid.ColumnHeadersHeightSizeMode = 'AutoSize'
     foreach ($column in @(
-        @('name', 'Компонент'), @('arch', 'Арх.'), @('versions', 'Версии'), @('outcome', 'Результат')
+        @('name', 'Компонент'), @('arch', 'Арх.'), @('versions', 'Версии'), @('outcome', $(if ($Plan) { 'Действие' } else { 'Результат' }))
     )) {
         $null = $grid.Columns.Add($column[0], $column[1])
         $item = $grid.Columns[$column[0]]
@@ -195,12 +208,20 @@ function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [b
         if ($column[0] -ne 'arch') { $item.AutoSizeMode = 'Fill'; $item.MinimumWidth = 170 }
         else { $item.AutoSizeMode = 'AllCells' }
     }
+    $colors = @{
+        failed = 'Firebrick'; 'pending-reboot' = 'DarkOrange'; installed = 'DarkGreen'; updated = 'DarkGreen'
+        repaired = 'DarkGreen'; 'planned-install' = 'DarkGreen'; 'planned-update' = 'DarkGreen'
+    }
     foreach ($result in $Results) {
         $before = if ($result.before) { $result.before } else { '—' }
         $after = if ($result.after) { $result.after } else { '—' }
-        $versions = "В пакете: $($result.available)`r`nДо: $before`r`nПосле: $after"
+        $versions = if ($Plan) { "В пакете: $($result.available)`r`nУстановлено: $before" }
+            else { "В пакете: $($result.available)`r`nДо: $before`r`nПосле: $after" }
         $outcome = Get-ResultLabel $result.status
-        $null = $grid.Rows.Add([object[]] @($result.name, $result.arch, $versions, $outcome))
+        $row = $grid.Rows.Add([object[]] @($result.name, $result.arch, $versions, $outcome))
+        if ($colors[$result.status] -and -not [Windows.Forms.SystemInformation]::HighContrast) {
+            $grid.Rows[$row].Cells['outcome'].Style.ForeColor = [Drawing.Color]::FromName($colors[$result.status])
+        }
     }
     $form.Tag.Layout.Controls.Add($grid, 0, 1)
     $form.Tag.Layout.RowCount = 4
@@ -223,18 +244,27 @@ function Show-InstallationResult([object[]] $Results, [string] $LogDirectory, [b
         }
     }
     $grid.Add_CurrentCellChanged($updateDetail)
-    $form.Add_Shown($updateDetail)
+    $form.Add_Shown({
+        # Open on the component that failed rather than on the first row.
+        for ($index = 0; $index -lt $Results.Count; $index++) {
+            if ($Results[$index].status -eq 'failed') { $grid.CurrentCell = $grid.Rows[$index].Cells[0]; break }
+        }
+        & $updateDetail
+    })
     $form.Tag.Layout.Controls.Add($detail, 0, 2)
     $buttons = New-RuntimeButtons
-    $report = New-RuntimeButton 'OpenReport' 'Открыть отчёт'
-    $report.Enabled = Test-Path (Join-Path $LogDirectory 'report.txt')
-    $report.Add_Click({ Start-Process notepad.exe -ArgumentList ('"' + (Join-Path $LogDirectory 'report.txt') + '"') })
-    $logs = New-RuntimeButton 'OpenLogs' 'Открыть журналы'
-    $logs.Enabled = Test-Path $LogDirectory
-    $logs.Add_Click({ Start-Process explorer.exe -ArgumentList ('"' + $LogDirectory + '"') })
+    if (-not $Plan) {
+        $report = New-RuntimeButton 'OpenReport' 'Открыть отчёт'
+        $report.Enabled = Test-Path (Join-Path $LogDirectory 'report.txt')
+        $report.Add_Click({ Start-Process notepad.exe -ArgumentList ('"' + (Join-Path $LogDirectory 'report.txt') + '"') })
+        $logs = New-RuntimeButton 'OpenLogs' 'Открыть журналы'
+        $logs.Enabled = Test-Path $LogDirectory
+        $logs.Add_Click({ Start-Process explorer.exe -ArgumentList ('"' + $LogDirectory + '"') })
+        $buttons.Controls.AddRange(@($report, $logs))
+    }
     $close = New-RuntimeButton 'CloseResult' 'Закрыть'
     $close.DialogResult = 'OK'
-    $buttons.Controls.AddRange(@($report, $logs, $close))
+    $buttons.Controls.Add($close)
     $form.Tag.Layout.Controls.Add($buttons, 0, 3)
     $form.AcceptButton = $close
     $form.CancelButton = $close

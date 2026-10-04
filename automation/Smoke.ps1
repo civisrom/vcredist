@@ -176,7 +176,8 @@ try {
     $mixedState = if ($ClientWindows) { Install-MixedBaseline } else { $null }
     Register-TestSdk
     Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Mode check"
-    Invoke-TestProcess $exe '/aiD /gm2' 120
+    $checkScreenshots = if ($env:VCR_SCREENSHOT_DIRECTORY) { "$env:VCR_SCREENSHOT_DIRECTORY\check" } else { "$work\check-screenshots" }
+    Invoke-TestProcess 'powershell.exe' "-NoProfile -STA -ExecutionPolicy Bypass -File `"$PSScriptRoot\Test-InteractiveInstall.ps1`" -Installer `"$exe`" -ScreenshotDirectory `"$checkScreenshots`" -Check" 600
     if ($ClientWindows) {
         Test-MixedUpdateOnly $mixedState
         Invoke-TestProcess 'powershell.exe' "-NoProfile -STA -ExecutionPolicy Bypass -File `"$PSScriptRoot\Test-InteractiveInstall.ps1`" -Installer `"$exe`" -ScreenshotDirectory `"$env:VCR_SCREENSHOT_DIRECTORY\first-install`"" 1800
@@ -205,8 +206,17 @@ try {
     )
     $repairHashes = @{}
     foreach ($path in $damaged) { $repairHashes[$path] = Get-Sha256 $path; Remove-Item -LiteralPath $path }
+    # Same version, different contents: version rules alone would keep this file.
+    $corrupted = "$env:SystemRoot\SysWOW64\mfc120u.dll"
+    $corruptedVersion = (Get-Item $corrupted).VersionInfo.FileVersionRaw
+    $bytes = [IO.File]::ReadAllBytes($corrupted)
+    $bytes[$bytes.Length - 1] = $bytes[$bytes.Length - 1] -bxor 0xFF
+    [IO.File]::WriteAllBytes($corrupted, $bytes)
+    if ((Get-Item $corrupted).VersionInfo.FileVersionRaw -ne $corruptedVersion) { throw 'The damaged file must keep its version.' }
     Invoke-TestProcess $exe '/aiF /gm2' 1200
     foreach ($path in $damaged) { if ((Get-Sha256 $path) -ne $repairHashes[$path]) { throw "Repair did not restore $path" } }
+    if ((Get-Sha256 $corrupted) -ne ($manifest.files | Where-Object path -eq '2013/x86/System/mfc120u.dll').sha256) { throw 'Repair kept a damaged file of the same version.' }
+    Write-Host 'PASS: repair restored deleted files and rewrote a damaged file of the same version'
     Assert-Installed
     Assert-Applications
 
@@ -246,6 +256,8 @@ try {
         if ($engine.ProductState($package.productCode) -eq 5) {
             $log = Get-Content "$work\remove-$($package.id).log" -Raw
             if ($log -notmatch 'Found dependent "') { throw "Unexpected MSI retention: $($package.id)" }
+            # On the clean client only the original Microsoft EXE depended on these.
+            if ($ClientWindows -and $package.family -in @('2012', '2026')) { throw "An obsolete Microsoft bundle still blocks removal: $($package.id)" }
             Write-Host "PASS: Windows Installer preserved $($package.id) for registered dependents"
             # Only on this disposable runner: also exercise actual MSI removal.
             Invoke-TestProcess 'msiexec.exe' "/x $($package.productCode) /qn /norestart IGNOREDEPENDENCIES=ALL /L*v `"$work\remove-forced-$($package.id).log`""
@@ -265,7 +277,9 @@ try {
     }
     Write-Host 'PASS: selected VC++ 2005 only; every other removed MSI remains absent'
     Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Components unknown-component -Quiet" -ExpectFailure
+    $legacyState = if ($ClientWindows) { Install-LegacyBaseline } else { $null }
     Invoke-TestProcess $exe '/ai /gm2' 900
+    if ($ClientWindows) { Assert-LegacyUpgrade $legacyState }
     Assert-Installed
     Assert-Applications
 

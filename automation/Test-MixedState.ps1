@@ -85,6 +85,7 @@ function Test-MixedUpdateOnly($State) {
     Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Mode update -Components vc14,dotnet-8.0,vc2013 -Quiet" 900
     $report = (Get-LatestInstallationReport).data
     if (-not $report.success) { throw 'Mixed update-only run failed.' }
+    Assert-RemovedBundles $report '^Microsoft Visual C\+\+ .+ Redistributable \((x86|x64)\) - 14\.44\.' 2
     foreach ($package in $packages) {
         $row = $report.packages | Where-Object id -eq $package.id
         if ($package.family -eq '2026' -or ($package.type -eq 'windowsdesktop' -and $package.channel -eq '8.0')) {
@@ -105,6 +106,10 @@ function Test-MixedUpdateOnly($State) {
 function Assert-MixedUpgradeReport($State) {
     $report = (Get-LatestInstallationReport).data
     if (-not $report.success -or $report.packages.Count -ne $manifest.packages.Count) { throw 'Incomplete installation report.' }
+    Assert-RemovedBundles $report '^Microsoft Visual C\+\+ 2012 Redistributable \((x86|x64)\) - 11\.0\.61030' 2
+    $equal = @(Get-RegisteredBundles | Where-Object name -Like 'Microsoft Visual C++ 2013 Redistributable (x64)*' | Sort-Object id -Unique)
+    if ($equal.Count -ne 1) { throw 'The Microsoft bundle of an equal version must stay registered.' }
+    Write-Host 'PASS: obsolete Microsoft bundle records removed; the bundle of an equal version preserved'
     foreach ($package in $packages) {
         $row = @($report.packages | Where-Object id -eq $package.id)
         if ($row.Count -ne 1) { throw "Missing report row: $($package.id)" }
@@ -127,10 +132,55 @@ function Assert-MixedUpgradeReport($State) {
     Write-Host 'PASS: VC2010 .325 -> .473 shared DLL patch upgrade with the same MSI ProductVersion and ProductCode'
 }
 
+function Assert-RemovedBundles($Report, [string] $Pattern, [int] $Count) {
+    $removed = @($Report.removedBundles | Where-Object { $_ -match $Pattern })
+    if ($removed.Count -ne $Count -or @($Report.removedBundles).Count -ne $Count) {
+        throw "Expected $Count removed bundle records matching $Pattern, got: $($Report.removedBundles -join '; ')"
+    }
+    $left = @(Get-RegisteredBundles | Where-Object { $_.name -match $Pattern })
+    if ($left.Count) { throw "Obsolete bundle is still registered: $($left.name -join '; ')" }
+}
+
+# A second wave on a machine without any shipped MSI: the most common old
+# VC++ 2013 release, installed by its original Microsoft EXE.
+function Install-LegacyBaseline {
+    $source = Get-Content "$PSScriptRoot/extra-upgrade-sources.json" -Raw | ConvertFrom-Json | Where-Object id -eq 'vc2013-x86'
+    $path = Join-Path $work 'legacy-vc2013-x86.exe'
+    $null = Save-Download $source.url $path -Microsoft -Sha256 $source.sha256
+    Invoke-TestProcess $path '/install /quiet /norestart' 600
+    $legacy = @($msis | Where-Object { $_.family -eq '2013' -and $_.arch -eq 'x86' })
+    foreach ($package in $legacy) {
+        $actual = Get-InstalledVersion $engine $package
+        if ($actual -ne [version] $source.version) { throw "Legacy baseline was not established: $($package.id) $actual" }
+        Write-Host "PASS: genuine preinstalled MSI $($package.id) $actual"
+    }
+    [pscustomobject]@{ packages = $legacy; version = $source.version }
+}
+
+function Assert-LegacyUpgrade($State) {
+    $report = (Get-LatestInstallationReport).data
+    if (-not $report.success) { throw 'Legacy upgrade failed.' }
+    foreach ($package in $State.packages) {
+        $row = $report.packages | Where-Object id -eq $package.id
+        if ($row.status -ne 'updated' -or $row.before -ne $State.version -or [version] $row.after -ne [version] $package.version) {
+            throw "Wrong legacy upgrade $($package.id): $($row.status), $($row.before) -> $($row.after)"
+        }
+    }
+    Assert-RemovedBundles $report '^Microsoft Visual C\+\+ 2013 Redistributable \(x86\) - 12\.0\.30501' 1
+    # With the obsolete record gone, ordinary removal works without overrides.
+    for ($i = $State.packages.Count - 1; $i -ge 0; $i--) {
+        $package = $State.packages[$i]
+        Invoke-TestProcess 'msiexec.exe' "/x $($package.productCode) /qn /norestart /L*v `"$work\remove-legacy-$($package.id).log`""
+        if ($engine.ProductState($package.productCode) -eq 5) { throw "Ordinary removal is still blocked: $($package.id)" }
+    }
+    Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Components vc2013 -Quiet"
+    Write-Host 'PASS: VC2013 12.0.30501 upgraded, its obsolete Microsoft record removed, ordinary removal and reinstallation work'
+}
+
 function Test-RealOlderOffer($State) {
     $offer = Join-Path $work 'older-offer'
     $null = New-Item -ItemType Directory $offer
-    Copy-Item "$payload/Install.ps1", "$payload/Interface.ps1", "$payload/Installer.cmd" $offer
+    Copy-Item "$payload/Install.ps1", "$payload/Interface.ps1", "$payload/Installer.cmd", "$payload/StartFailure.txt" $offer
     $old = $State.previous | Where-Object { $_.package.channel -eq '6.0' -and $_.package.arch -eq 'x86' }
     $package = $old.package.PSObject.Copy()
     $package.version = $old.version

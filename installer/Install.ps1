@@ -4,7 +4,8 @@
     [switch] $Quiet,
     [ValidateNotNullOrEmpty()]
     [string] $Components,
-    [switch] $SelectPackages
+    [switch] $SelectPackages,
+    [switch] $ShowPlan
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -36,6 +37,19 @@ function Get-PackageAction([version] $Available, [version] $Installed, [string] 
         return 'skip'
     }
     return 'install'
+}
+
+# What the selection window says about each component before anything is installed.
+function Get-SelectionState([object[]] $Packages, [hashtable] $Installed) {
+    $states = @{}
+    foreach ($group in $Packages | Group-Object { Get-ComponentId $_ }) {
+        $present = @($group.Group | Where-Object { $Installed[$_.id] })
+        $current = @($group.Group | Where-Object { (Get-PackageAction ([version] $_.version) $Installed[$_.id] 'install' $false) -eq 'skip' })
+        $states[$group.Name] = if (-not $present.Count) { 'не установлено' }
+            elseif ($current.Count -eq $group.Count) { 'установлено, обновление не требуется' }
+            else { 'доступно обновление' }
+    }
+    $states
 }
 
 function Get-PayloadPath([string] $Root, [string] $Relative) {
@@ -88,18 +102,111 @@ public static class RuntimeMsi {
     $best
 }
 
-function Get-SupersededMsiPatches($Engine, $Package) {
-    if (-not $Package.PSObject.Properties['supersededPatches']) { return }
+function Get-BinaryVersion([string] $Path) {
+    $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($Path)
+    [version]::new($info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart)
+}
+
+# Windows Installer keeps a file of the same version even when its contents
+# differ, so a repair has to be told to rewrite equal versions.
+function Test-DamagedRuntimeFile($Package, [object[]] $Files, [string] $Root, [hashtable] $Folders) {
+    $directory = (Split-Path $Package.path).Replace('\', '/') + '/'
+    foreach ($file in $Files) {
+        if (-not $file.path.StartsWith($directory, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $folder = Split-Path (Split-Path $file.path) -Leaf
+        if (-not $Folders.ContainsKey($folder)) { continue }
+        $installed = Join-Path $Folders[$folder] (Split-Path $file.path -Leaf)
+        if (-not (Test-Path -LiteralPath $installed)) { continue }
+        if ((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash -eq $file.sha256) { continue }
+        if ((Get-BinaryVersion $installed) -eq (Get-BinaryVersion (Get-PayloadPath $Root $file.path))) { return $true }
+    }
+    $false
+}
+
+function Get-SupersededMsiPatches($Engine, $Package, [switch] $All) {
+    if (-not $All -and -not $Package.PSObject.Properties['supersededPatches']) { return }
     $patches = $Engine.Patches($Package.productCode)
     try {
         foreach ($code in $patches) {
-            if ([string]$code -in $Package.supersededPatches) { [string]$code }
+            if ($All -or [string]$code -in $Package.supersededPatches) { [string]$code }
         }
     } finally {
         if ($null -ne $patches -and [Runtime.InteropServices.Marshal]::IsComObject($patches)) {
             $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($patches)
         }
     }
+}
+
+function Get-FullVersion([version] $Version) {
+    [version]::new($Version.Major, $Version.Minor, [Math]::Max($Version.Build, 0), [Math]::Max($Version.Revision, 0))
+}
+
+function Get-RegisteredBundles {
+    foreach ($view in @('Registry64', 'Registry32')) {
+        $hive = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', $view)
+        $uninstall = $hive.OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall')
+        try {
+            if (-not $uninstall) { continue }
+            foreach ($name in $uninstall.GetSubKeyNames()) {
+                $key = $uninstall.OpenSubKey($name)
+                if (-not $key) { continue }
+                try {
+                    if ($key.GetValue('BundleCachePath')) {
+                        [pscustomobject]@{
+                            id = $name; name = [string] $key.GetValue('DisplayName'); publisher = [string] $key.GetValue('Publisher')
+                            version = [string] $key.GetValue('BundleVersion'); cachePath = [string] $key.GetValue('BundleCachePath')
+                            providerKey = [string] $key.GetValue('BundleProviderKey')
+                        }
+                    }
+                } finally { $key.Dispose() }
+            }
+        } finally { if ($uninstall) { $uninstall.Dispose() }; $hive.Dispose() }
+    }
+}
+
+function Get-DependencyProviders {
+    $root = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Classes\Installer\Dependencies')
+    if (-not $root) { return }
+    try {
+        foreach ($name in $root.GetSubKeyNames()) {
+            $key = $root.OpenSubKey($name)
+            if (-not $key) { continue }
+            try {
+                $dependents = $key.OpenSubKey('Dependents')
+                if (-not $dependents) { continue }
+                try { [pscustomobject]@{ key = $name; product = [string] $key.GetValue(''); dependents = @($dependents.GetSubKeyNames()) } }
+                finally { $dependents.Dispose() }
+            } finally { $key.Dispose() }
+        }
+    } finally { $root.Dispose() }
+}
+
+# An original Microsoft EXE stays registered after its MSI packages have been
+# upgraded. Its record then shows an old version and blocks their removal.
+# Only a Microsoft Visual C++ bundle whose every package was replaced by a
+# newer installed product of this set is obsolete; anything else is kept.
+function Select-ObsoleteBundles([object[]] $Bundles, [object[]] $Providers, [hashtable] $Products) {
+    foreach ($bundle in $Bundles) {
+        if ($bundle.publisher -ne 'Microsoft Corporation' -or -not $bundle.cachePath -or
+            $bundle.name -notmatch '^Microsoft Visual C\+\+ .+ Redistributable \((x86|x64)\)') { continue }
+        $version = $null
+        if (-not [version]::TryParse($bundle.version, [ref] $version)) { continue }
+        $packages = @($Providers | Where-Object { $bundle.id -in $_.dependents -and $_.key -ne $bundle.providerKey -and $_.product -ne $bundle.id })
+        if (-not $packages.Count) { continue }
+        $replaced = @($packages | Where-Object {
+            $Products.ContainsKey($_.product) -and (Get-FullVersion $Products[$_.product]) -gt (Get-FullVersion $version)
+        })
+        if ($replaced.Count -eq $packages.Count) { $bundle }
+    }
+}
+
+function Invoke-InstallerProcess([string] $File, [string] $Arguments, [bool] $Interactive) {
+    if ($Interactive) {
+        $process = Start-Process -FilePath $File -ArgumentList $Arguments -PassThru
+        while (-not $process.WaitForExit(100)) { [Windows.Forms.Application]::DoEvents() }
+        $process.Refresh()
+    } else { $process = Start-Process -FilePath $File -ArgumentList $Arguments -Wait -PassThru }
+    $process.ExitCode
 }
 
 function Get-DesktopVersion($Package) {
@@ -146,16 +253,18 @@ function Complete-InstallationResult($Result, [version] $Actual, [version] $Inst
     $Result.reason = if ($Action -eq 'repair') { 'Компонент восстановлен; версия проверена.' } else { 'Установка завершена; версия проверена.' }
 }
 
-function Save-InstallationReport([object[]] $Results, [string] $Directory, [bool] $Reboot, [string] $Failure) {
+function Save-InstallationReport([object[]] $Results, [string] $Directory, [bool] $Reboot, [string] $Failure, [string[]] $RemovedBundles = @()) {
     $null = New-Item -ItemType Directory -Path $Directory -Force
     $report = [ordered]@{
         schema = 1; completedAt = [DateTime]::Now.ToString('o'); mode = $Mode
         success = (-not $Failure); rebootRequired = $Reboot; error = $Failure; packages = @($Results)
+        removedBundles = @($RemovedBundles)
     }
     $report | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $Directory 'report.json') -Encoding UTF8
     $lines = @('Runtimes AIO — результат установки', "Дата: $($report.completedAt)", "Режим: $Mode")
     if ($Failure) { $lines += "Ошибка: $Failure" }
     if ($Reboot) { $lines += 'Для завершения установки требуется перезагрузка Windows.' }
+    foreach ($bundle in $RemovedBundles) { $lines += "Удалена устаревшая запись установщика Microsoft: $bundle" }
     foreach ($item in $Results) {
         $before = if ($item.before) { $item.before } else { 'не установлено' }
         $after = if ($item.after) { $item.after } else { 'не подтверждено' }
@@ -166,7 +275,7 @@ function Save-InstallationReport([object[]] $Results, [string] $Directory, [bool
 }
 
 function Invoke-Installation {
-    $interactive = -not $Quiet -and $Mode -ne 'check' -and [Environment]::OSVersion.Platform -eq 'Win32NT'
+    $interactive = -not $Quiet -and ($Mode -ne 'check' -or $ShowPlan) -and [Environment]::OSVersion.Platform -eq 'Win32NT'
     $progress = $null
     $engine = $null
     $transcribing = $false
@@ -176,6 +285,7 @@ function Invoke-Installation {
     $exitCode = 0
     $currentResult = $null
     $results = New-Object 'Collections.Generic.List[object]'
+    $removedBundles = New-Object 'Collections.Generic.List[string]'
     $logDir = Join-Path $env:ProgramData ('civisrom\VisualCppRedist\logs\' + [DateTime]::Now.ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N'))
     try {
         if ([Environment]::OSVersion.Platform -ne 'Win32NT' -or [Environment]::OSVersion.Version.Major -lt 10) {
@@ -197,6 +307,7 @@ function Invoke-Installation {
         if ($SelectPackages -and ($Quiet -or $Components -or $Mode -ne 'install')) {
             throw 'Окно выбора используется только для обычной установки без -Quiet и -Components.'
         }
+        if ($ShowPlan -and ($Quiet -or $Mode -ne 'check')) { throw 'Окно проверки состава используется только с -Mode check без -Quiet.' }
         $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') -Raw | ConvertFrom-Json
         if ($manifest.schema -ne 1) { throw 'Неизвестный формат manifest.json.' }
         if ($interactive) { $progress = New-InstallationProgress }
@@ -208,14 +319,22 @@ function Invoke-Installation {
             if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $file.sha256) { throw "Повреждён файл: $($file.path)" }
             $verified++
         }
-        if ($progress) { $progress.Dispose(); $progress = $null }
         $arch = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
         $packages = @($manifest.packages | Where-Object {
             if ($_.family -eq 'vstor') { $_.arch -eq $arch }
             else { $_.arch -eq 'x86' -or $_.arch -eq $arch }
         })
+        $detected = @{}
         if ($SelectPackages) {
-            $Components = Show-PackageSelection $packages
+            $engine = New-Object -ComObject WindowsInstaller.Installer
+            foreach ($package in $packages) {
+                Set-InstallationProgress $progress 'Проверка установленных версий' "$($package.name)`r`nАрхитектура: $($package.arch). Версия в пакете: $($package.version)."
+                $detected[$package.id] = Get-InstalledVersion $engine $package
+            }
+        }
+        if ($progress) { $progress.Dispose(); $progress = $null }
+        if ($SelectPackages) {
+            $Components = Show-PackageSelection $packages (Get-SelectionState $packages $detected)
             if (-not $Components) { $cancelled = $true; Write-Host 'Установка отменена.'; return 0 }
         }
         $selected = if ($Components) { @(Select-Components $packages $Components) } else { $packages }
@@ -225,7 +344,7 @@ function Invoke-Installation {
             $transcribing = $true
         }
         if ($interactive) { $progress = New-InstallationProgress }
-        $engine = New-Object -ComObject WindowsInstaller.Installer
+        if (-not $engine) { $engine = New-Object -ComObject WindowsInstaller.Installer }
         $byId = @{}
         foreach ($package in $manifest.packages) {
             $item = New-InstallationResult $package
@@ -243,6 +362,10 @@ function Invoke-Installation {
             if ($package.id -notin $selected.id) { $item.status = 'not-selected'; $item.reason = 'Компонент не выбран пользователем.' }
         }
         $completed = 0
+        $systemFolders = @{
+            System64 = "$env:SystemRoot\System32"
+            System = $(if ([Environment]::Is64BitOperatingSystem) { "$env:SystemRoot\SysWOW64" } else { "$env:SystemRoot\System32" })
+        }
         foreach ($package in $selected) {
             $currentResult = $byId[$package.id]
             # Re-read after each installation: bundles can change shared components.
@@ -250,7 +373,12 @@ function Invoke-Installation {
             $exact = if ($package.type -eq 'msi') { $engine.ProductState($package.productCode) -eq 5 } else { $true }
             $action = Get-PackageAction ([version] $package.version) $installed $Mode $exact
             Write-Host "$($package.name) [$($package.arch)] $($package.version): $action"
-            if ($Mode -eq 'check') { continue }
+            if ($Mode -eq 'check') {
+                $currentResult.status = if ($action -eq 'skip') { 'skipped' } elseif ($installed) { 'planned-update' } else { 'planned-install' }
+                $currentResult.reason = if ($action -eq 'skip') { Get-SkipReason ([version] $package.version) $installed $Mode }
+                    else { 'Будет обработано при обычной установке.' }
+                continue
+            }
             if ($action -eq 'skip') {
                 $currentResult.status = 'skipped'
                 $currentResult.reason = Get-SkipReason ([version] $package.version) $installed $Mode
@@ -265,11 +393,12 @@ function Invoke-Installation {
             $installSteps = @()
             if ($package.type -eq 'msi') {
                 $executable = "$env:SystemRoot\System32\msiexec.exe"
-                $arguments = "/i `"$path`" /qn /norestart /L*v `"$log`""
+                $arguments = "/i `"$path`" /qn /norestart"
                 # Both minor upgrades (for example VC2005) and DLL-only patches
                 # (VC2010) keep ProductCode. Recache their new MSI and update files.
                 if ($exact) {
-                    $arguments += ' REINSTALL=ALL REINSTALLMODE=vomus'
+                    $damaged = $Mode -eq 'repair' -and (Test-DamagedRuntimeFile $package $manifest.files $PSScriptRoot $systemFolders)
+                    $arguments += ' REINSTALL=ALL REINSTALLMODE=' + $(if ($damaged) { 'vemus' } else { 'vomus' })
                     $patches = @(Get-SupersededMsiPatches $engine $package)
                     if ($patches.Count) {
                         # Patch removal restores its baseline cache, even when a
@@ -278,29 +407,62 @@ function Invoke-Installation {
                         $installSteps += @{ log = $patchLog; arguments = "/i $($package.productCode) /qn /norestart /L*v `"$patchLog`" MSIPATCHREMOVE=`"$($patches -join ';')`"" }
                     }
                 }
+                $installSteps += @{ log = $log; arguments = "$arguments /L*v `"$log`"" }
             } else {
                 $executable = $path
                 $operation = if ($action -eq 'repair') { '/repair' } else { '/install' }
-                $arguments = "$operation /quiet /norestart /log `"$log`""
+                $installSteps += @{ log = $log; arguments = "$operation /quiet /norestart /log `"$log`"" }
             }
-            $installSteps += @{ log = $log; arguments = $arguments }
             $currentResult.after = ''
-            foreach ($step in $installSteps) {
-                $log = $step.log
-                if ($interactive) {
-                    $process = Start-Process -FilePath $executable -ArgumentList $step.arguments -PassThru
-                    while (-not $process.WaitForExit(100)) { [Windows.Forms.Application]::DoEvents() }
-                    $process.Refresh()
-                } else { $process = Start-Process -FilePath $executable -ArgumentList $step.arguments -Wait -PassThru }
-                if ($null -eq $currentResult.exitCode -or $process.ExitCode -ne 0) { $currentResult.exitCode = $process.ExitCode }
-                if ($process.ExitCode -notin @(0, 3010)) { throw "Ошибка установки $($package.id): $($process.ExitCode). Журнал: $log" }
-                if ($process.ExitCode -eq 3010) { $reboot = $true }
-            }
-            $actual = Get-InstalledVersion $engine $package
+            $retried = $false
+            do {
+                foreach ($step in $installSteps) {
+                    $log = $step.log
+                    $code = Invoke-InstallerProcess $executable $step.arguments $interactive
+                    if ($null -eq $currentResult.exitCode -or $code -ne 0) { $currentResult.exitCode = $code }
+                    if ($code -notin @(0, 3010)) { throw "Ошибка установки $($package.id): $code. Журнал: $log" }
+                    if ($code -eq 3010) { $reboot = $true }
+                }
+                $actual = Get-InstalledVersion $engine $package
+                $installSteps = @()
+                # A patch outside the known list reapplies its older files over
+                # the new package. Retire every remaining patch and repeat once.
+                if (-not $retried -and $package.type -eq 'msi' -and $exact -and $currentResult.exitCode -ne 3010 -and
+                    (-not $actual -or $actual -lt [version] $package.version)) {
+                    $patches = @(Get-SupersededMsiPatches $engine $package -All)
+                    if ($patches.Count) {
+                        $retried = $true
+                        $patchLog = Join-Path $logDir ($package.id + '-remove-patch-2.log')
+                        $log = Join-Path $logDir ($package.id + '-2.log')
+                        $installSteps = @(
+                            @{ log = $patchLog; arguments = "/i $($package.productCode) /qn /norestart /L*v `"$patchLog`" MSIPATCHREMOVE=`"$($patches -join ';')`"" },
+                            @{ log = $log; arguments = "$arguments /L*v `"$log`"" }
+                        )
+                    }
+                }
+            } while ($installSteps.Count)
             Complete-InstallationResult $currentResult $actual $installed $action $log
             $completed++
         }
-        if ($Mode -ne 'check') { Write-Host "Установка завершена. Отчёт и журналы: $logDir" }
+        if ($Mode -ne 'check') {
+            $products = @{}
+            foreach ($candidate in $selected | Where-Object type -eq 'msi') {
+                if ($engine.ProductState($candidate.productCode) -eq 5) {
+                    $products[$candidate.productCode] = [version] $engine.ProductInfo($candidate.productCode, 'VersionString')
+                }
+            }
+            $obsolete = @(Select-ObsoleteBundles @(Get-RegisteredBundles | Sort-Object id -Unique) @(Get-DependencyProviders) $products)
+            foreach ($bundle in $obsolete) {
+                if (-not (Test-Path -LiteralPath $bundle.cachePath)) { Write-Host "Устаревшая запись сохранена, её установщик отсутствует: $($bundle.name)"; continue }
+                Set-InstallationProgress $progress 'Удаление устаревших записей' "$($bundle.name)`r`nБиблиотеки этой записи уже заменены более новыми."
+                $bundleLog = Join-Path $logDir ('bundle-' + $bundle.id.Trim('{}') + '.log')
+                $code = Invoke-InstallerProcess $bundle.cachePath "/uninstall /quiet /norestart /log `"$bundleLog`"" $interactive
+                if ($code -eq 3010) { $reboot = $true }
+                if ($code -in @(0, 3010)) { $removedBundles.Add($bundle.name); Write-Host "Удалена устаревшая запись: $($bundle.name)" }
+                else { Write-Host "Устаревшая запись сохранена, код $code`: $($bundle.name). Журнал: $bundleLog" }
+            }
+            Write-Host "Установка завершена. Отчёт и журналы: $logDir"
+        }
         if ($reboot) { Write-Host 'Для завершения требуется перезагрузка.'; $exitCode = 3010 }
     } catch {
         $failure = $_.Exception.Message
@@ -318,10 +480,10 @@ function Invoke-Installation {
         if ($engine) { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine) }
         if ($transcribing) { $null = Stop-Transcript }
         if ($Mode -ne 'check' -and -not $cancelled) {
-            try { Save-InstallationReport $results.ToArray() $logDir $reboot $failure }
+            try { Save-InstallationReport $results.ToArray() $logDir $reboot $failure $removedBundles.ToArray() }
             catch { $failure += " Не удалось сохранить отчёт: $($_.Exception.Message)"; $exitCode = 1; Write-Error $failure -ErrorAction Continue }
             if ($interactive) { Show-InstallationResult $results.ToArray() $logDir $reboot $failure }
-        }
+        } elseif ($ShowPlan) { Show-InstallationResult $results.ToArray() '' $false $failure -Plan }
     }
     $exitCode
 }
@@ -330,6 +492,11 @@ if ($MyInvocation.InvocationName -ne '.') {
     # A launch from PowerShell 7 can pass its incompatible module path to 5.1.
     # This installer needs only the modules bundled with the executing shell.
     $env:PSModulePath = Join-Path $PSHOME 'Modules'
-    try { $result = Invoke-Installation; exit $result }
+    try {
+        $result = Invoke-Installation
+        # Tells Installer.cmd that the outcome was shown or logged by this script.
+        if ($env:RUNTIMES_AIO_REPORTED) { try { [IO.File]::WriteAllText($env:RUNTIMES_AIO_REPORTED, '') } catch { } }
+        exit $result
+    }
     catch { Write-Error ("$_`n" + $_.ScriptStackTrace) -ErrorAction Continue; exit 1 }
 }

@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory)] [string] $Installer, [Parameter(Mandatory)] [string] $ScreenshotDirectory, [switch] $Repeat, [switch] $DialogsOnly)
+﻿param([Parameter(Mandatory)] [string] $Installer, [Parameter(Mandatory)] [string] $ScreenshotDirectory, [switch] $Repeat, [switch] $DialogsOnly, [switch] $Check)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 Add-Type -AssemblyName System.Windows.Forms
@@ -23,10 +23,11 @@ function Click-Button($Window, [string[]] $Titles) {
     [RuntimeWindowProbe]::Click($button[0].Handle)
 }
 
-$scenarios = if ($DialogsOnly) { @('help', 'cancel') } elseif ($Repeat) { @('install') } else { @('help', 'cancel', 'install') }
+$scenarios = if ($Check) { @('check') } elseif ($DialogsOnly) { @('help', 'cancel', 'check') } elseif ($Repeat) { @('install') } else { @('help', 'cancel', 'install') }
 foreach ($scenario in $scenarios) {
     # /y suppresses the extraction cancellation prompt; exercise the normal launch.
     $process = if ($scenario -eq 'help') { Start-Process $Installer -ArgumentList '/?' -PassThru }
+        elseif ($scenario -eq 'check') { Start-Process $Installer -ArgumentList '/aiD /gm2' -PassThru }
         else { Start-Process $Installer -PassThru }
     $deadline = [DateTime]::UtcNow.AddMinutes(25)
     $seen = @{}
@@ -40,6 +41,11 @@ foreach ($scenario in $scenarios) {
                     Save-Stage $window '01-help'
                     $seen.help = $true
                     Click-Button $window @('OK', 'ОК')
+                } elseif ($scenario -eq 'check' -and $window.Title -like 'Проверка состава*' -and -not $seen.plan) {
+                    Save-Stage $window '08-check-plan'
+                    if ($text -notlike '*Система не изменялась*') { throw "The package check reported a failure: $text" }
+                    $seen.plan = $true
+                    Click-Button $window @('Закрыть')
                 } elseif ($window.Title -like 'Распаковка*' -and -not $seen.extract) {
                     Save-Stage $window "$scenario-02-extraction"
                     $seen.extract = $true
@@ -73,6 +79,7 @@ foreach ($scenario in $scenarios) {
         if (-not $process.HasExited) { throw "Interactive $scenario timed out." }
         if ($scenario -eq 'help' -and -not $seen.help) { throw 'Help was not shown.' }
         if ($scenario -eq 'cancel' -and (-not $seen.extract -or -not $seen.cancel)) { throw 'Extraction cancellation was not exercised.' }
+        if ($scenario -eq 'check' -and -not $seen.plan) { throw 'The package check window was not shown.' }
         if ($scenario -eq 'install') {
             foreach ($stage in @('extract', 'verify', 'selection', 'result')) { if (-not $seen[$stage]) { throw "Missing installation stage: $stage" } }
             $reportFile = Get-ChildItem "$env:ProgramData/civisrom/VisualCppRedist/logs" -Filter report.json -Recurse |

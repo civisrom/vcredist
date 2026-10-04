@@ -46,6 +46,13 @@ foreach ($family in @('2005', '2008', '2010', '2012', '2013', '2026', 'vbc', 'vs
 foreach ($channel in @('6.0', '7.0', '8.0', '9.0', '10.0', '12.0')) {
     $packages += [pscustomobject]@{ id = "desktop-$channel"; type = 'windowsdesktop'; family = 'dotnet'; channel = $channel; arch = 'x64'; version = "$channel.31"; name = ".NET Windows Desktop Runtime $channel" }
 }
+# Absent, older and current components, as detected before the selection window.
+$selectionInstalled = @{}
+for ($index = 0; $index -lt $packages.Count; $index++) {
+    $selectionInstalled[$packages[$index].id] = @($null, [version]'1.0', [version]'99.0')[$index % 3]
+}
+$selectionStates = Get-SelectionState $packages $selectionInstalled
+if (@($selectionStates.Values | Select-Object -Unique).Count -ne 3) { throw 'Expected three distinct component states.' }
 $statuses = @('installed', 'updated', 'repaired', 'skipped', 'not-selected', 'not-applicable', 'failed', 'not-run', 'pending-reboot')
 $rows = @()
 for ($index = 0; $index -lt 32; $index++) {
@@ -60,7 +67,7 @@ $temp = Join-Path ([IO.Path]::GetTempPath()) ('runtime-ui-' + [guid]::NewGuid().
 $null = New-Item -ItemType Directory $temp
 try {
     foreach ($fontSize in @(10, 12.5, 15, 20)) {
-        foreach ($scenario in @('selection', 'result', 'reboot', 'failure')) {
+        foreach ($scenario in @('selection', 'result', 'reboot', 'failure', 'plan')) {
             $script:uiFailure = $null
             $script:callbackRan = $false
             $timer = New-Object Windows.Forms.Timer
@@ -75,6 +82,9 @@ try {
                     if ($scenario -eq 'selection') {
                         $list = $window.Controls.Find('ComponentList', $true)[0]
                         if ($list.Items.Count -ne $packages.Count) { throw 'The selector lost components.' }
+                        foreach ($state in $selectionStates.Values | Select-Object -Unique) {
+                            if (-not @($list.Items | Where-Object { $_.EndsWith(" — $state") }).Count) { throw "The selector does not show the state: $state" }
+                        }
                         $list.TopIndex = $list.Items.Count - 1
                         Save-Window $window "$scenario-$fontSize-bottom"
                         $window.Controls.Find('CancelSelection', $true)[0].PerformClick()
@@ -82,6 +92,8 @@ try {
                         $grid = $window.Controls.Find('ResultTable', $true)[0]
                         $detail = $window.Controls.Find('ResultDetail', $true)[0]
                         if (-not $detail.Text.Contains($displayRows[0].reason)) { throw 'Initial result details are missing.' }
+                        $failed = @($displayRows | Where-Object status -eq 'failed')
+                        if ($failed.Count -and -not $detail.Text.Contains($failed[0].name)) { throw 'The result must open on the failed component.' }
                         if ($grid.Rows.Count -ne $rows.Count) { throw 'The report lost rows.' }
                         for ($rowIndex = 0; $rowIndex -lt $grid.Rows.Count; $rowIndex++) {
                             $grid.CurrentCell = $grid.Rows[$rowIndex].Cells[0]
@@ -99,7 +111,7 @@ try {
             })
             try {
                 $timer.Start()
-                if ($scenario -eq 'selection') { $null = Show-PackageSelection $packages }
+                if ($scenario -eq 'selection') { $null = Show-PackageSelection $packages $selectionStates }
                 else {
                     $failure = if ($scenario -eq 'failure') { 'Ошибка установки компонента. Не удалось завершить обработку пакета; остальные выбранные компоненты не устанавливались.' } else { '' }
                     $displayRows = @($rows | ForEach-Object { $_.PSObject.Copy() })
@@ -109,8 +121,14 @@ try {
                     if ($scenario -ne 'reboot') {
                         foreach ($row in $displayRows | Where-Object status -eq 'pending-reboot') { $row.status = 'skipped' }
                     }
-                    Save-InstallationReport $displayRows $temp ($scenario -eq 'reboot') $failure
-                    Show-InstallationResult $displayRows $temp ($scenario -eq 'reboot') $failure
+                    if ($scenario -eq 'plan') {
+                        $planStatuses = @('planned-install', 'planned-update', 'skipped', 'not-applicable')
+                        for ($index = 0; $index -lt $displayRows.Count; $index++) { $displayRows[$index].status = $planStatuses[$index % $planStatuses.Count] }
+                        Show-InstallationResult $displayRows '' $false '' -Plan
+                    } else {
+                        Save-InstallationReport $displayRows $temp ($scenario -eq 'reboot') $failure
+                        Show-InstallationResult $displayRows $temp ($scenario -eq 'reboot') $failure
+                    }
                 }
                 if ($script:uiFailure) { throw $script:uiFailure }
                 if (-not $script:callbackRan) { throw 'The visual test did not run.' }

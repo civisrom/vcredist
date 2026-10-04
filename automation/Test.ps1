@@ -84,6 +84,18 @@ foreach ($mode in @('update', 'repair')) {
     Assert-Equal (Get-SkipReason ([version]'8.0.31') ([version]'8.0.32') $mode) $newerReason "A newer version is reported as newer in $mode mode"
 }
 Assert-Equal (Get-SkipReason ([version]'8.0.31') ([version]'8.0.31') 'update') $equalReason 'An equal version in update mode is not reported as absent'
+$stateFixture = @(
+    [pscustomobject]@{ id = 'a86'; type = 'msi'; family = '2012'; version = '11.0.61135' },
+    [pscustomobject]@{ id = 'a64'; type = 'msi'; family = '2012'; version = '11.0.61135' },
+    [pscustomobject]@{ id = 'n8'; type = 'windowsdesktop'; channel = '8.0'; version = '8.0.31' }
+)
+$absentState = (Get-SelectionState $stateFixture @{})['vc2012']
+$currentState = (Get-SelectionState $stateFixture @{ a86 = [version]'11.0.61135'; a64 = [version]'11.0.61200' })['vc2012']
+$updateState = (Get-SelectionState $stateFixture @{ a86 = [version]'11.0.61135'; a64 = [version]'11.0.61030' })['vc2012']
+Assert-Equal (@($absentState, $currentState, $updateState | Select-Object -Unique).Count) 3 'The selection window distinguishes absent, current and outdated components'
+Assert-Equal (Get-SelectionState $stateFixture @{ a86 = [version]'11.0.61135' })['vc2012'] $updateState 'A missing architecture of an installed family is an available update'
+Assert-Equal (Get-SelectionState $stateFixture @{ n8 = [version]'0.0' })['dotnet-8.0'] $updateState 'An incomplete Desktop Runtime is an available update'
+Assert-Equal (Get-SelectionState $stateFixture @{ n8 = [version]'8.0.31' })['vc2012'] $absentState 'Each component reports its own state'
 $componentFixture = @('2005', '2008', '2010', '2012', '2013', '2026', 'vbc', 'vstor' | ForEach-Object { [pscustomobject]@{ type = 'msi'; family = $_ } })
 $componentFixture += [pscustomobject]@{ type = 'windowsdesktop'; family = 'windowsdesktop'; channel = '10.0' }
 $componentIds = @($componentFixture | ForEach-Object { Get-ComponentId $_ })
@@ -98,6 +110,68 @@ $patchedPackage.supersededPatches = @('absent-patch')
 Assert-Equal @(Get-SupersededMsiPatches $patchEngine $patchedPackage).Count 0 'Do not attempt to remove an absent patch'
 $patchEngine | Add-Member ScriptMethod Patches { param($code) } -Force
 Assert-Equal @(Get-SupersededMsiPatches $patchEngine $patchedPackage).Count 0 'An unpatched product has no obsolete patches'
+$patchEngine | Add-Member ScriptMethod Patches { param($code) @('known-obsolete-patch', 'unrelated-patch') } -Force
+Assert-Equal (@(Get-SupersededMsiPatches $patchEngine ([pscustomobject]@{ productCode = 'product' }) -All) -join ',') 'known-obsolete-patch,unrelated-patch' 'The recovery after an unconfirmed upgrade retires every remaining patch'
+
+# Obsolete Microsoft bundles: only a Visual C++ bundle whose every package was
+# replaced by a newer installed product of this set may be removed.
+$vcProducts = @{ '{MIN}' = [version]'14.51.36247'; '{ADD}' = [version]'14.51.36247'; '{VC13}' = [version]'12.0.40664' }
+$vcProviders = @(
+    [pscustomobject]@{ key = 'Minimum,v14'; product = '{min}'; dependents = @('{OLD14}', '{APP}', 'VisualStudio') },
+    [pscustomobject]@{ key = 'Additional,v14'; product = '{ADD}'; dependents = @('{OLD14}') },
+    [pscustomobject]@{ key = 'VC,redist.x64,amd64,14.44,bundle'; product = '{OLD14}'; dependents = @('{OLD14}') },
+    [pscustomobject]@{ key = 'Minimum,v12'; product = '{VC13}'; dependents = @('{SAME13}') },
+    [pscustomobject]@{ key = 'Foreign'; product = '{FOREIGN}'; dependents = @('{MIXED}') },
+    [pscustomobject]@{ key = 'Minimum,v14'; product = '{MIN}'; dependents = @('{MIXED}') }
+)
+function New-BundleFixture([string] $Id, [string] $Name, [string] $Version, [string] $Publisher = 'Microsoft Corporation', [string] $CachePath = 'C:\cache\setup.exe') {
+    [pscustomobject]@{ id = $Id; name = $Name; publisher = $Publisher; version = $Version; cachePath = $CachePath; providerKey = 'VC,redist.x64,amd64,14.44,bundle' }
+}
+$vcBundles = @(
+    (New-BundleFixture '{OLD14}' 'Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.44.35211' '14.44.35211.0'),
+    (New-BundleFixture '{SAME13}' 'Microsoft Visual C++ 2013 Redistributable (x64) - 12.0.40664' '12.0.40664.0'),
+    (New-BundleFixture '{APP}' 'Some Application' '1.0.0.0' 'Some Vendor'),
+    (New-BundleFixture '{MIXED}' 'Microsoft Visual C++ 2015-2022 Redistributable (x86) - 14.40.33810' '14.40.33810.0'),
+    (New-BundleFixture '{UNUSED}' 'Microsoft Visual C++ 2012 Redistributable (x86) - 11.0.61030' '11.0.61030.0')
+)
+Assert-Equal ((Select-ObsoleteBundles $vcBundles $vcProviders $vcProducts | ForEach-Object id) -join ',') '{OLD14}' 'Remove only the replaced Visual C++ bundle; keep an equal one, another application, a bundle with a foreign package and one without packages'
+$appAsRedist = New-BundleFixture '{APP}' 'Microsoft Visual C++ 2015-2022 Redistributable (x64) - 1.0' '1.0.0.0' 'Some Vendor'
+Assert-Equal @(Select-ObsoleteBundles @($appAsRedist) $vcProviders $vcProducts).Count 0 'A bundle of another publisher is never removed'
+$appNamed = New-BundleFixture '{APP}' 'Microsoft Visual Studio Tools' '1.0.0.0'
+Assert-Equal @(Select-ObsoleteBundles @($appNamed) $vcProviders $vcProducts).Count 0 'Another Microsoft product that depends on the runtime is never removed'
+$partial = @{ '{MIN}' = [version]'14.51.36247'; '{ADD}' = [version]'14.44.35211' }
+Assert-Equal @(Select-ObsoleteBundles $vcBundles $vcProviders $partial).Count 0 'Keep a bundle while one of its own packages is still installed'
+Assert-Equal @(Select-ObsoleteBundles $vcBundles $vcProviders @{ '{MIN}' = [version]'14.51.36247' }).Count 0 'Keep a bundle whose other package was not selected'
+Assert-Equal @(Select-ObsoleteBundles @((New-BundleFixture '{OLD14}' $vcBundles[0].name '14.44.35211.0' 'Microsoft Corporation' '')) $vcProviders $vcProducts).Count 0 'A bundle without its cached installer cannot be removed officially'
+Assert-Equal @(Select-ObsoleteBundles @((New-BundleFixture '{OLD14}' $vcBundles[0].name 'unknown')) $vcProviders $vcProducts).Count 0 'A bundle without a readable version is kept'
+Assert-Equal @(Select-ObsoleteBundles @() @() @{}).Count 0 'A clean system has nothing to remove'
+Assert-Equal ((Get-FullVersion ([version]'12.0.40664')) -eq (Get-FullVersion ([version]'12.0.40664.0'))) $true 'MSI and bundle versions of the same release are equal'
+
+# A repair must rewrite an installed file whose version matches but whose
+# contents differ; missing and intact files follow the ordinary rules.
+$damageRoot = Join-Path ([IO.Path]::GetTempPath()) ('runtime-damage-test-' + [guid]::NewGuid().ToString('N'))
+try {
+    $binary = [psobject].Assembly.Location
+    foreach ($directory in @('2026/x64/System64', '2026/x86/System', 'system32', 'syswow64')) { $null = New-Item -ItemType Directory (Join-Path $damageRoot $directory) }
+    Copy-Item $binary (Join-Path $damageRoot '2026/x64/System64/runtime.dll')
+    Copy-Item $binary (Join-Path $damageRoot '2026/x86/System/runtime.dll')
+    $damageFiles = @('2026/x64/System64/runtime.dll', '2026/x86/System/runtime.dll', '2026/x64/package.msi' | ForEach-Object {
+        [pscustomobject]@{ path = $_; sha256 = (Get-Sha256 $binary) }
+    })
+    $damageFolders = @{ System64 = (Join-Path $damageRoot 'system32'); System = (Join-Path $damageRoot 'syswow64') }
+    $damagePackage = [pscustomobject]@{ path = '2026/x64/package.msi' }
+    Assert-Equal (Test-DamagedRuntimeFile $damagePackage $damageFiles $damageRoot $damageFolders) $false 'A missing file is restored by the ordinary repair'
+    Copy-Item $binary (Join-Path $damageRoot 'system32/runtime.dll')
+    Assert-Equal (Test-DamagedRuntimeFile $damagePackage $damageFiles $damageRoot $damageFolders) $false 'An intact file needs no forced rewrite'
+    $bytes = [IO.File]::ReadAllBytes($binary)
+    $bytes[$bytes.Length - 1] = $bytes[$bytes.Length - 1] -bxor 0xFF
+    [IO.File]::WriteAllBytes((Join-Path $damageRoot 'syswow64/runtime.dll'), $bytes)
+    Assert-Equal (Test-DamagedRuntimeFile $damagePackage $damageFiles $damageRoot $damageFolders) $false 'Damage of the other architecture does not affect this package'
+    Assert-Equal (Test-DamagedRuntimeFile ([pscustomobject]@{ path = '2026/x86/package.msi' }) $damageFiles $damageRoot $damageFolders) $true 'Detect a damaged file of the same version'
+    [IO.File]::WriteAllBytes((Join-Path $damageRoot 'system32/runtime.dll'), [byte[]] @(1, 2, 3))
+    Assert-Equal (Test-DamagedRuntimeFile $damagePackage $damageFiles $damageRoot $damageFolders) $false 'A file of another version is left to the version rules'
+} finally { Remove-Item $damageRoot -Recurse -Force }
+Assert-Equal (@('planned-install', 'planned-update', 'skipped' | ForEach-Object { Get-ResultLabel $_ } | Select-Object -Unique).Count) 3 'The check window names each planned action'
 $selectionFixture = @(
     [pscustomobject]@{ id = 'vc14-x86'; type = 'msi'; family = '2026' },
     [pscustomobject]@{ id = 'vc14-x64'; type = 'msi'; family = '2026' },
@@ -116,7 +190,7 @@ try {
     $result = New-InstallationResult ([pscustomobject]@{ id = '2010-x86'; name = 'Visual C++ 2010'; arch = 'x86'; version = '10.0.40219.473' })
     $result.before = '10.0.40219.325'; $result.after = '10.0.40219.473'; $result.status = 'updated'; $result.exitCode = 3010
     $pending = New-InstallationResult ([pscustomobject]@{ id = 'pending'; name = 'Unprocessed package'; arch = 'x64'; version = '1.0' })
-    Save-InstallationReport @($result, $pending) $reportDirectory $true 'A later package failed'
+    Save-InstallationReport @($result, $pending) $reportDirectory $true 'A later package failed' @('Microsoft Visual C++ 2012 Redistributable (x86) - 11.0.61030')
     $report = Get-Content (Join-Path $reportDirectory 'report.json') -Raw | ConvertFrom-Json
     Assert-Equal $report.success $false 'An incomplete installation must not be reported as successful'
     Assert-Equal $report.rebootRequired $true 'Preserve a reboot request when a later package fails'
@@ -124,6 +198,10 @@ try {
     Assert-Equal $report.packages[0].after '10.0.40219.473' 'Preserve confirmed resulting version in report'
     Assert-Equal $report.packages[1].status 'not-run' 'Do not claim installation of unprocessed packages'
     Assert-Equal $report.packages[0].exitCode 3010 'Preserve the native installer exit code'
+    Assert-Equal ($report.removedBundles -join ',') 'Microsoft Visual C++ 2012 Redistributable (x86) - 11.0.61030' 'Report every removed Microsoft bundle record'
+    Assert-Equal ((Get-Content (Join-Path $reportDirectory 'report.txt') -Raw).Contains('11.0.61030')) $true 'Readable report names the removed bundle record'
+    Save-InstallationReport @($result) $reportDirectory $false ''
+    Assert-Equal @((Get-Content (Join-Path $reportDirectory 'report.json') -Raw | ConvertFrom-Json).removedBundles).Count 0 'An ordinary run removes no bundle records'
     Assert-Equal ((Get-Content (Join-Path $reportDirectory 'report.txt') -Raw).Contains('10.0.40219.473')) $true 'Readable report retains the complete patch version'
     Complete-InstallationResult $result ([version]'10.0.40219.325') ([version]'10.0.40219.325') 'install' 'test.log'
     Assert-Equal $result.status 'pending-reboot' 'A deferred replacement is pending rather than confirmed or failed'

@@ -70,6 +70,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native font measurement tests failed.' }
           powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./automation/Test-Interface.ps1 -PayloadRoot ./installer -ScreenshotDirectory "$env:RUNNER_TEMP/interface-screenshots"
           if ($LASTEXITCODE -ne 0) { throw 'Interface layout tests failed.' }
+          powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./automation/Test-Launcher.ps1 -ScreenshotDirectory "$env:RUNNER_TEMP/interface-screenshots/launcher"
+          if ($LASTEXITCODE -ne 0) { throw 'Launcher failure reporting tests failed.' }
       - name: Проверка Microsoft и сборка полного набора
         if: ${{ !inputs.interface_only }}
         id: build
