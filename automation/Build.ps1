@@ -17,14 +17,23 @@ $sources = [Collections.Generic.List[object]]::new()
 
 function Receive-Source($Source, [switch] $Legacy) {
     $url = $Source['url']
-    if ($Source['page']) {
-        $page = Join-Path $downloads ($Source.id + '.html')
-        $null = Save-Download $Source.page $page -Microsoft
-        $url = Get-DownloadLink (Get-Content $page -Raw) $Source.file
-    }
     $extension = if ($Source['file'] -like '*.msi') { '.msi' } else { '.exe' }
     $path = Join-Path $downloads ($Source.id + $extension)
-    $resolved = Save-Download $url $path -Microsoft
+    try {
+        if ($Source['page']) {
+            $page = Join-Path $downloads ($Source.id + '.html')
+            $null = Save-Download $Source.page $page -Microsoft
+            $url = Get-DownloadLink (Get-Content $page -Raw) $Source.file
+        }
+        $resolved = Save-Download $url $path -Microsoft
+    } catch {
+        if (-not $Legacy) { throw }
+        # A monitor is not packaged. Its retirement by Microsoft must not stop
+        # the current updates; only changed contents require a review.
+        Write-Host "::warning::Legacy monitor $($Source.id) is unavailable: $($_.Exception.Message)"
+        $sources.Add([ordered]@{ id = $Source.id; url = $url; sha256 = $Source.sha256; version = $null; policy = 'pinned-legacy-monitor' })
+        return
+    }
     $hash = Get-Sha256 $path
     if ($Legacy) {
         if ($hash -ne $Source.sha256) {
@@ -45,10 +54,12 @@ function Receive-Source($Source, [switch] $Legacy) {
 }
 
 foreach ($source in $catalog.current) { Receive-Source $source }
+$vc14 = @($sources | Where-Object { $_.id -like 'vc14-*' } | ForEach-Object { $_.version } | Select-Object -Unique)
+if ($vc14.Count -ne 1) { throw "Microsoft serves different VC++ v14 versions for x86 and x64: $($vc14 -join ', ')" }
 foreach ($source in $catalog.legacyMonitors) { Receive-Source $source -Legacy }
 
 $indexPath = Join-Path $downloads 'dotnet-index.json'
-$null = Save-Download 'https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json' $indexPath -Microsoft
+$null = Save-Download 'https://builds.dotnet.microsoft.com/dotnet/release-metadata/releases-index.json' $indexPath -Microsoft
 $channels = @(Get-DotNetChannels (Get-Content $indexPath -Raw | ConvertFrom-Json))
 $desktopPackages = [Collections.Generic.List[object]]::new()
 foreach ($channel in $channels) {
@@ -71,6 +82,17 @@ foreach ($channel in $channels) {
         $sources.Add([ordered]@{ id = $id; url = $url; sha256 = Get-Sha256 $path; version = $desktop.version; policy = 'microsoft-current' })
         $desktopPackages.Add([ordered]@{ id = $id; type = 'windowsdesktop'; family = 'windowsdesktop'; arch = $arch; channel = $line; version = $desktop.version; name = ".NET Windows Desktop Runtime $line"; path = "dotnet/$id.exe" })
         Write-Host "$id`: $($desktop.version) ($($channel.'support-phase'))"
+    }
+}
+
+if ($env:GITHUB_REPOSITORY -and $env:GH_TOKEN) {
+    $published = & gh release list --repo $env:GITHUB_REPOSITORY --exclude-drafts --limit 1 --json tagName
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read the published releases.' }
+    if (@($published | ConvertFrom-Json).Count) {
+        $publishedDirectory = Join-Path $downloads 'published'
+        Invoke-Checked 'gh' @('release', 'download', '--repo', $env:GITHUB_REPOSITORY, '--pattern', 'manifest.json', '--dir', $publishedDirectory)
+        Assert-NoSourceRegression @((Get-Content (Join-Path $publishedDirectory 'manifest.json') -Raw | ConvertFrom-Json).sources) $sources.ToArray()
+        Write-Host 'No source is older than in the published release.'
     }
 }
 

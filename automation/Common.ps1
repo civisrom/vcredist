@@ -34,31 +34,53 @@ function Get-PreviousDesktopRelease($Metadata, [version] $Version) {
     $previous
 }
 
-# Check every redirect, not only the first and last host.
+# A published source must not disappear or return to an older version: the
+# monthly build would otherwise publish a silently reduced or rolled back set.
+function Assert-NoSourceRegression([object[]] $Previous, [object[]] $Current) {
+    foreach ($old in $Previous | Where-Object policy -eq 'microsoft-current') {
+        $new = @($Current | Where-Object id -eq $old.id)
+        if ($new.Count -ne 1) { throw "Microsoft source disappeared since the published release: $($old.id)" }
+        $before = $null; $after = $null
+        if (-not [version]::TryParse(("$($old.version)" -replace '[^\d.].*$'), [ref] $before)) { continue }
+        if (-not [version]::TryParse(("$($new[0].version)" -replace '[^\d.].*$'), [ref] $after)) { throw "No version for $($old.id); the published release has $before" }
+        if ($after -lt $before) { throw "Microsoft returned $($old.id) $after, older than the published $before" }
+    }
+}
+
+# Check every redirect, not only the first and last host. A single network
+# failure must not cost a whole month until the next scheduled build.
 function Save-Download([string] $Url, [string] $Path, [switch] $Microsoft, [string] $Sha256) {
-    $handler = [System.Net.Http.HttpClientHandler]::new()
-    $handler.AllowAutoRedirect = $false
-    $client = [System.Net.Http.HttpClient]::new($handler)
-    $client.Timeout = [TimeSpan]::FromMinutes(5)
-    $client.DefaultRequestHeaders.UserAgent.ParseAdd('civisrom-vcredist/1.0')
-    try {
-        for ($redirect = 0; $redirect -le 10; $redirect++) {
-            if ($Microsoft) { Assert-MicrosoftUrl $Url }
-            $response = $client.GetAsync($Url).GetAwaiter().GetResult()
-            try {
-                $status = [int] $response.StatusCode
-                if ($status -in @(301, 302, 303, 307, 308)) {
-                    $Url = [uri]::new([uri] $Url, $response.Headers.Location).AbsoluteUri
-                    continue
-                }
-                $null = $response.EnsureSuccessStatusCode()
-                [IO.File]::WriteAllBytes($Path, $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult())
-                if ($Sha256 -and (Get-Sha256 $Path) -ne $Sha256) { throw "SHA256 mismatch: $Path" }
-                return $Url
-            } finally { $response.Dispose() }
-        }
-        throw "Too many redirects: $Url"
-    } finally { $client.Dispose(); $handler.Dispose() }
+    $source = $Url
+    for ($attempt = 1; ; $attempt++) {
+        $Url = $source
+        $handler = [System.Net.Http.HttpClientHandler]::new()
+        $handler.AllowAutoRedirect = $false
+        $client = [System.Net.Http.HttpClient]::new($handler)
+        $client.Timeout = [TimeSpan]::FromMinutes(5)
+        $client.DefaultRequestHeaders.UserAgent.ParseAdd('civisrom-vcredist/1.0')
+        try {
+            for ($redirect = 0; $redirect -le 10; $redirect++) {
+                if ($Microsoft) { Assert-MicrosoftUrl $Url }
+                $response = $client.GetAsync($Url).GetAwaiter().GetResult()
+                try {
+                    $status = [int] $response.StatusCode
+                    if ($status -in @(301, 302, 303, 307, 308)) {
+                        $Url = [uri]::new([uri] $Url, $response.Headers.Location).AbsoluteUri
+                        continue
+                    }
+                    $null = $response.EnsureSuccessStatusCode()
+                    [IO.File]::WriteAllBytes($Path, $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult())
+                    if ($Sha256 -and (Get-Sha256 $Path) -ne $Sha256) { throw "SHA256 mismatch: $Path" }
+                    return $Url
+                } finally { $response.Dispose() }
+            }
+            throw "Too many redirects: $Url"
+        } catch [System.Net.Http.HttpRequestException], [System.Threading.Tasks.TaskCanceledException], [System.IO.IOException] {
+            if ($attempt -ge 3) { throw }
+            Write-Host "Download attempt $attempt failed, retrying: $source ($($_.Exception.Message))"
+            Start-Sleep -Seconds (15 * $attempt)
+        } finally { $client.Dispose(); $handler.Dispose() }
+    }
 }
 
 function Get-DownloadLink([string] $Html, [string] $FileName) {

@@ -153,7 +153,7 @@ function Get-RegisteredBundles {
                 try {
                     if ($key.GetValue('BundleCachePath')) {
                         [pscustomobject]@{
-                            id = $name; name = [string] $key.GetValue('DisplayName'); publisher = [string] $key.GetValue('Publisher')
+                            view = $view; id = $name; name = [string] $key.GetValue('DisplayName'); publisher = [string] $key.GetValue('Publisher')
                             version = [string] $key.GetValue('BundleVersion'); cachePath = [string] $key.GetValue('BundleCachePath')
                             providerKey = [string] $key.GetValue('BundleProviderKey')
                         }
@@ -187,7 +187,7 @@ function Get-DependencyProviders {
 # newer installed product of this set is obsolete; anything else is kept.
 function Select-ObsoleteBundles([object[]] $Bundles, [object[]] $Providers, [hashtable] $Products) {
     foreach ($bundle in $Bundles) {
-        if ($bundle.publisher -ne 'Microsoft Corporation' -or -not $bundle.cachePath -or
+        if ($bundle.publisher -ne 'Microsoft Corporation' -or
             $bundle.name -notmatch '^Microsoft Visual C\+\+ .+ Redistributable \((x86|x64)\)') { continue }
         $version = $null
         if (-not [version]::TryParse($bundle.version, [ref] $version)) { continue }
@@ -197,6 +197,27 @@ function Select-ObsoleteBundles([object[]] $Bundles, [object[]] $Providers, [has
             $Products.ContainsKey($_.product) -and (Get-FullVersion $Products[$_.product]) -gt (Get-FullVersion $version)
         })
         if ($replaced.Count -eq $packages.Count) { $bundle }
+    }
+}
+
+# The bundle's own uninstaller would also remove the newer packages that now
+# own its provider keys, so only its stale registration and cache are deleted.
+function Remove-ObsoleteBundle($Bundle, [object[]] $Providers) {
+    $dependencies = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Classes\Installer\Dependencies', $true)
+    try {
+        foreach ($provider in $Providers | Where-Object { $Bundle.id -in $_.dependents }) {
+            if ($provider.product -eq $Bundle.id -or $provider.key -eq $Bundle.providerKey) { $dependencies.DeleteSubKeyTree($provider.key, $false) }
+            else { $dependencies.DeleteSubKeyTree("$($provider.key)\Dependents\$($Bundle.id)", $false) }
+        }
+    } finally { $dependencies.Dispose() }
+    $hive = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', $Bundle.view)
+    try {
+        $uninstall = $hive.OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', $true)
+        try { $uninstall.DeleteSubKeyTree($Bundle.id, $false) } finally { $uninstall.Dispose() }
+    } finally { $hive.Dispose() }
+    $cache = Split-Path $Bundle.cachePath
+    if ((Split-Path $cache -Leaf) -eq $Bundle.id -and (Test-Path -LiteralPath $cache)) {
+        Remove-Item -LiteralPath $cache -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -451,15 +472,13 @@ function Invoke-Installation {
                     $products[$candidate.productCode] = [version] $engine.ProductInfo($candidate.productCode, 'VersionString')
                 }
             }
-            $obsolete = @(Select-ObsoleteBundles @(Get-RegisteredBundles | Sort-Object id -Unique) @(Get-DependencyProviders) $products)
-            foreach ($bundle in $obsolete) {
-                if (-not (Test-Path -LiteralPath $bundle.cachePath)) { Write-Host "Устаревшая запись сохранена, её установщик отсутствует: $($bundle.name)"; continue }
-                Set-InstallationProgress $progress 'Удаление устаревших записей' "$($bundle.name)`r`nБиблиотеки этой записи уже заменены более новыми."
-                $bundleLog = Join-Path $logDir ('bundle-' + $bundle.id.Trim('{}') + '.log')
-                $code = Invoke-InstallerProcess $bundle.cachePath "/uninstall /quiet /norestart /log `"$bundleLog`"" $interactive
-                if ($code -eq 3010) { $reboot = $true }
-                if ($code -in @(0, 3010)) { $removedBundles.Add($bundle.name); Write-Host "Удалена устаревшая запись: $($bundle.name)" }
-                else { Write-Host "Устаревшая запись сохранена, код $code`: $($bundle.name). Журнал: $bundleLog" }
+            $providers = @(Get-DependencyProviders)
+            foreach ($bundle in @(Select-ObsoleteBundles @(Get-RegisteredBundles | Sort-Object id -Unique) $providers $products)) {
+                try {
+                    Remove-ObsoleteBundle $bundle $providers
+                    $removedBundles.Add($bundle.name)
+                    Write-Host "Удалена устаревшая запись: $($bundle.name)"
+                } catch { Write-Host "Устаревшая запись сохранена: $($bundle.name). $($_.Exception.Message)" }
             }
             Write-Host "Установка завершена. Отчёт и журналы: $logDir"
         }

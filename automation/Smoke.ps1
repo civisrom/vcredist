@@ -80,7 +80,7 @@ function Register-TestSdk {
     # have a real owner during the Desktop uninstall/coexistence tests.
     $package = $desktop | Where-Object arch -eq 'x64' | Sort-Object { [version] $_.version } -Descending | Select-Object -First 1
     $metadataPath = Join-Path $work 'sdk-release.json'
-    $null = Save-Download "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/$($package.channel)/releases.json" $metadataPath -Microsoft
+    $null = Save-Download "https://builds.dotnet.microsoft.com/dotnet/release-metadata/$($package.channel)/releases.json" $metadataPath -Microsoft
     $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
     $release = @($metadata.releases | Where-Object {
         $_.PSObject.Properties['windowsdesktop'] -and $_.windowsdesktop.version -eq $package.version
@@ -156,7 +156,7 @@ function Install-PreviousPatch {
     $package = $desktop | Where-Object { $_.arch -eq 'x86' -and -not (Get-DesktopVersion $_) } | Select-Object -First 1
     if (-not $package) { throw 'No empty x86 .NET branch for the real patch-upgrade test.' }
     $metadataPath = Join-Path $work 'previous-release.json'
-    $null = Save-Download "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/$($package.channel)/releases.json" $metadataPath -Microsoft
+    $null = Save-Download "https://builds.dotnet.microsoft.com/dotnet/release-metadata/$($package.channel)/releases.json" $metadataPath -Microsoft
     $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
     $previous = Get-PreviousDesktopRelease $metadata ([version]$package.version)
     if (-not $previous) { throw 'No previous stable Desktop patch in Microsoft metadata.' }

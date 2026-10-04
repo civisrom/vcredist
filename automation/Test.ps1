@@ -55,6 +55,33 @@ Assert-Equal (Get-PreviousDesktopRelease $futureReleases ([version]'12.0.0')) $n
 Assert-Equal (Get-PreviousDesktopRelease $futureReleases ([version]'12.0.1')).windowsdesktop.version '12.0.0' 'The next patch must upgrade from the first stable release'
 Assert-Throws { Get-PreviousDesktopRelease ('{"releases":[]}' | ConvertFrom-Json) ([version]'12.0.1') } 'Missing history for an existing branch must not silently skip upgrade coverage'
 
+$publishedSources = @(
+    [pscustomobject]@{ id = 'vc14-x64'; version = '14.51.36247.0'; policy = 'microsoft-current' },
+    [pscustomobject]@{ id = 'vstor'; version = '10.0.60917.00'; policy = 'microsoft-current' },
+    [pscustomobject]@{ id = 'windowsdesktop-8.0-x64'; version = '8.0.31'; policy = 'microsoft-current' },
+    [pscustomobject]@{ id = 'vc2005-x86'; version = '6.00.2900.2180 (xpsp_sp2_rtm.040803-2158)'; policy = 'pinned-legacy-monitor' }
+)
+function New-CurrentSources([string] $Vc14 = '14.52.1.0', [string] $Desktop = '8.0.32') {
+    @(
+        [ordered]@{ id = 'vc14-x64'; version = $Vc14; policy = 'microsoft-current' },
+        [ordered]@{ id = 'vstor'; version = '10.0.60917.00'; policy = 'microsoft-current' },
+        [ordered]@{ id = 'windowsdesktop-8.0-x64'; version = $Desktop; policy = 'microsoft-current' },
+        [ordered]@{ id = 'windowsdesktop-11.0-x64'; version = '11.0.0'; policy = 'microsoft-current' }
+    )
+}
+Assert-NoSourceRegression $publishedSources (New-CurrentSources)
+$checks++
+Assert-NoSourceRegression $publishedSources (New-CurrentSources '14.51.36247.0' '8.0.31')
+$checks++
+Assert-NoSourceRegression @() (New-CurrentSources)
+$checks++
+Assert-Throws { Assert-NoSourceRegression $publishedSources (New-CurrentSources '14.50.35719.0') } 'Microsoft serving an older VC++ than the published one stops the build'
+Assert-Throws { Assert-NoSourceRegression $publishedSources (New-CurrentSources '14.52.1.0' '8.0.30') } 'An older Desktop Runtime patch stops the build'
+Assert-Throws { Assert-NoSourceRegression $publishedSources (New-CurrentSources '' '8.0.32') } 'A current source without a version stops the build'
+Assert-Throws { Assert-NoSourceRegression $publishedSources @(New-CurrentSources | Where-Object { $_.id -ne 'windowsdesktop-8.0-x64' }) } 'A published .NET branch must not silently disappear from the set'
+Assert-NoSourceRegression $publishedSources @(New-CurrentSources | Where-Object { $_.id -ne 'vc2005-x86' })
+$checks++
+
 Assert-Equal (Get-PackageAction ([version]'14.51.1') $null 'install' $false) 'install' 'missing runtime'
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.44.1') 'install' $false) 'install' 'older runtime'
 foreach ($mode in @('install', 'update', 'repair')) {
@@ -142,7 +169,6 @@ Assert-Equal @(Select-ObsoleteBundles @($appNamed) $vcProviders $vcProducts).Cou
 $partial = @{ '{MIN}' = [version]'14.51.36247'; '{ADD}' = [version]'14.44.35211' }
 Assert-Equal @(Select-ObsoleteBundles $vcBundles $vcProviders $partial).Count 0 'Keep a bundle while one of its own packages is still installed'
 Assert-Equal @(Select-ObsoleteBundles $vcBundles $vcProviders @{ '{MIN}' = [version]'14.51.36247' }).Count 0 'Keep a bundle whose other package was not selected'
-Assert-Equal @(Select-ObsoleteBundles @((New-BundleFixture '{OLD14}' $vcBundles[0].name '14.44.35211.0' 'Microsoft Corporation' '')) $vcProviders $vcProducts).Count 0 'A bundle without its cached installer cannot be removed officially'
 Assert-Equal @(Select-ObsoleteBundles @((New-BundleFixture '{OLD14}' $vcBundles[0].name 'unknown')) $vcProviders $vcProducts).Count 0 'A bundle without a readable version is kept'
 Assert-Equal @(Select-ObsoleteBundles @() @() @{}).Count 0 'A clean system has nothing to remove'
 Assert-Equal ((Get-FullVersion ([version]'12.0.40664')) -eq (Get-FullVersion ([version]'12.0.40664.0'))) $true 'MSI and bundle versions of the same release are equal'

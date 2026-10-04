@@ -52,7 +52,7 @@ function Install-MixedBaseline {
     $previous = @()
     foreach ($group in $desktop | Group-Object channel) {
         $metadataPath = Join-Path $directory ("desktop-$($group.Name).json")
-        $null = Save-Download "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/$($group.Name)/releases.json" $metadataPath -Microsoft
+        $null = Save-Download "https://builds.dotnet.microsoft.com/dotnet/release-metadata/$($group.Name)/releases.json" $metadataPath -Microsoft
         $metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
         $older = Get-PreviousDesktopRelease $metadata ([version]$group.Group[0].version)
         if (-not $older) {
