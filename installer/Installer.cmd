@@ -20,5 +20,5 @@ for %%A in (%*) do (
 if defined silent if not defined plan exit /b %code%
 set "RUNTIMES_AIO_HOME=%~dp0"
 set "RUNTIMES_AIO_CODE=%code%"
-"%ps%" -NoLogo -NoProfile -Command "$text = [IO.File]::ReadAllText((Join-Path $env:RUNTIMES_AIO_HOME 'StartFailure.txt')).Replace('{0}', $env:RUNTIMES_AIO_CODE); $null = (New-Object -ComObject WScript.Shell).Popup($text, 120, 'Runtimes AIO', 16)"
+"%ps%" -NoLogo -NoProfile -Command "$text = [IO.File]::ReadAllText((Join-Path $env:RUNTIMES_AIO_HOME 'StartFailure.txt')).Trim().Replace('{0}', $env:RUNTIMES_AIO_CODE); $null = (New-Object -ComObject WScript.Shell).Popup($text, 120, 'Runtimes AIO', 16)"
 exit /b %code%

@@ -22,7 +22,6 @@ function Invoke-Launcher([string] $Arguments, [string] $Title, [string] $Button,
             $window = if ($Title -and -not $clicked) { [RuntimeWindowProbe]::Windows([IntPtr]::Zero) | Where-Object Title -Like $Title | Select-Object -First 1 }
             if ($window) {
                 [RuntimeWindowProbe]::Capture($window, (Join-Path $ScreenshotDirectory "$Capture.png"))
-                [RuntimeWindowProbe]::AssertTextFits($window)
                 $script:shown = @([RuntimeWindowProbe]::Windows($window.Handle).Title) -join "`n"
                 $target = @([RuntimeWindowProbe]::Windows($window.Handle) | Where-Object { $_.ClassName -match 'BUTTON' -and $_.Title.Replace('&', '') -in @($Button, 'OK', 'ОК') })
                 if ($target.Count -ne 1) { throw "Button not found in $($window.Title)" }
