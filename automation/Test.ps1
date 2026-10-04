@@ -277,6 +277,7 @@ try {
     $releaseFixture | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $releaseDirectory 'manifest.json') -Encoding UTF8
     $notes = & "$PSScriptRoot/Release.ps1" -Directory $releaseDirectory -Preview
     Assert-Equal $notes.tag 'runtimes-aaaaaaaaaaaa' 'Release identity follows the verified fingerprint'
+    Assert-Equal $notes.title 'v2026.01.02-03.04' 'Release name is the UTC build date and time'
     Assert-Equal $notes.body.Contains('14.51.36247.0') $true 'Release lists the actual VC++ version'
     Assert-Equal $notes.body.Contains('8.0.31') $true 'Release lists the actual Desktop version'
     Assert-Equal $notes.body.Contains('/actions/runs/123456)') $true 'Release links to the verified run'

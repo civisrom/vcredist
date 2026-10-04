@@ -3,7 +3,8 @@
 $manifest = Get-Content (Join-Path $Directory 'manifest.json') -Raw | ConvertFrom-Json
 if ($manifest.fingerprint -notmatch '^[a-f0-9]{64}$') { throw 'Invalid release fingerprint.' }
 $tag = 'runtimes-' + $manifest.fingerprint.Substring(0, 12)
-$date = ([datetime] $manifest.builtAt).ToUniversalTime().ToString('yyyy.MM.dd')
+# The build time in UTC: the same verified package keeps its name on a repeated run.
+$title = 'v' + ([datetime] $manifest.builtAt).ToUniversalTime().ToString('yyyy.MM.dd-HH.mm', [Globalization.CultureInfo]::InvariantCulture)
 $vc = ($manifest.sources | Where-Object id -eq 'vc14-x64').version
 $net = ($manifest.packages | Where-Object { $_.type -eq 'windowsdesktop' -and $_.arch -eq 'x64' } | ForEach-Object version) -join ', '
 $testRun = if ($env:VERIFIED_RUN_ID) { $env:VERIFIED_RUN_ID } else { $env:GITHUB_RUN_ID }
@@ -18,7 +19,7 @@ Visual C++ упакован компактно; .NET включён оригин
 
 [Инструкция](https://github.com/$env:GITHUB_REPOSITORY#readme) · [Проверки](https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$testRun)
 "@
-if ($Preview) { [pscustomobject]@{ tag = $tag; title = "Runtimes AIO — $date"; body = $body }; return }
+if ($Preview) { [pscustomobject]@{ tag = $tag; title = $title; body = $body }; return }
 if ($env:GITHUB_REF -ne 'refs/heads/master') { throw 'Releases are only published from master.' }
 $files = @('Runtimes_AIO_x86_x64.exe', 'manifest.json', 'SHA256SUMS')
 foreach ($file in $files) { if (-not (Test-Path (Join-Path $Directory $file))) { throw "Missing release asset: $file" } }
@@ -52,9 +53,9 @@ if ($releaseExists -and -not $existing.draft) {
 $notes = Join-Path $env:RUNNER_TEMP 'runtime-release-notes.md'
 $body | Set-Content $notes -Encoding utf8
 if (-not $releaseExists) {
-    Invoke-Checked 'gh' @('release', 'create', $tag, '--draft', '--target', $env:GITHUB_SHA, '--title', "Runtimes AIO — $date", '--notes-file', $notes)
+    Invoke-Checked 'gh' @('release', 'create', $tag, '--draft', '--target', $env:GITHUB_SHA, '--title', $title, '--notes-file', $notes)
 } else {
-    Invoke-Checked 'gh' @('release', 'edit', $tag, '--title', "Runtimes AIO — $date", '--notes-file', $notes)
+    Invoke-Checked 'gh' @('release', 'edit', $tag, '--title', $title, '--notes-file', $notes)
 }
 Invoke-Checked 'gh' (@('release', 'upload', $tag, '--clobber') + @($files | ForEach-Object { Join-Path $Directory $_ }))
 $release = Get-RepositoryRelease
