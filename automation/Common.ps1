@@ -100,6 +100,45 @@ function Assert-MicrosoftSignature([string] $Path) {
     }
 }
 
+# When Microsoft signed the file: the timestamp inside its embedded signature.
+# Server dates are unusable: the same release shows months of difference.
+function Get-SignatureTime([string] $Path) {
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $header = [BitConverter]::ToInt32($bytes, 0x3C)
+    $directories = $header + 24 + $(if ([BitConverter]::ToUInt16($bytes, $header + 24) -eq 0x20b) { 112 } else { 96 })
+    $offset = [BitConverter]::ToInt32($bytes, $directories + 32)
+    $size = [BitConverter]::ToInt32($bytes, $directories + 36)
+    if ($offset -le 0 -or $size -le 8) { throw "No embedded signature: $Path" }
+    $signature = [byte[]]::new([BitConverter]::ToInt32($bytes, $offset) - 8)
+    [Array]::Copy($bytes, $offset + 8, $signature, 0, $signature.Length)
+    $cms = [System.Security.Cryptography.Pkcs.SignedCms]::new()
+    $cms.Decode($signature)
+    $signer = $cms.SignerInfos[0]
+    foreach ($attribute in $signer.UnsignedAttributes) {
+        if ($attribute.Oid.Value -ne '1.3.6.1.4.1.311.3.3.1') { continue }
+        $token = $null; $consumed = 0
+        if ([System.Security.Cryptography.Pkcs.Rfc3161TimestampToken]::TryDecode($attribute.Values[0].RawData, [ref] $token, [ref] $consumed)) {
+            return $token.TokenInfo.Timestamp.UtcDateTime
+        }
+    }
+    foreach ($counter in $signer.CounterSignerInfos) {
+        foreach ($attribute in $counter.SignedAttributes) {
+            if ($attribute.Oid.Value -eq '1.2.840.113549.1.9.5') {
+                return ([System.Security.Cryptography.Pkcs.Pkcs9SigningTime] $attribute.Values[0]).SigningTime.ToUniversalTime()
+            }
+        }
+    }
+    throw "No signature timestamp: $Path"
+}
+
+# A permanent link that Microsoft stopped updating keeps passing every check.
+function Get-StaleSourceMessage([string] $Id, [string] $Version, [datetime] $Signed, [datetime] $Now, [int] $Days = 183) {
+    $age = [int] ($Now - $Signed).TotalDays
+    if ($age -gt $Days) {
+        "$Id $Version was signed $($Signed.ToString('yyyy-MM-dd')), $age days ago. Check whether Microsoft moved the current release to another link."
+    }
+}
+
 function Invoke-Checked([string] $File, [string[]] $Arguments) {
     & $File @Arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "$File exited with $LASTEXITCODE" }

@@ -50,6 +50,7 @@ jobs:
       artifact: ${{ steps.build.outputs.artifact }}
       candidate_id: ${{ steps.candidate.outputs.artifact-id }}
       verified_run_id: ${{ steps.build.outputs.verified_run_id }}
+      stale: ${{ steps.build.outputs.stale }}
     defaults:
       run:
         shell: pwsh
@@ -112,6 +113,19 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           retention-days: 1
+
+  # Fails the run to send a notification; building and releasing do not wait for it.
+  freshness:
+    needs: build
+    if: needs.build.outputs.stale != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Источник Microsoft давно не обновлялся
+        env:
+          STALE: ${{ needs.build.outputs.stale }}
+        run: |
+          echo "::error::$STALE"
+          exit 1
 
   lifecycle:
     needs: build

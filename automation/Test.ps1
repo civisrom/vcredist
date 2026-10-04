@@ -82,6 +82,15 @@ Assert-Throws { Assert-NoSourceRegression $publishedSources @(New-CurrentSources
 Assert-NoSourceRegression $publishedSources @(New-CurrentSources | Where-Object { $_.id -ne 'vc2005-x86' })
 $checks++
 
+$staleNow = [datetime]'2026-10-05'
+Assert-Equal (Get-StaleSourceMessage 'vc14-x64' '14.51' $staleNow.AddDays(-270) $staleNow 270) $null 'A release within the allowed age is current'
+Assert-Equal ((Get-StaleSourceMessage 'vc14-x64' '14.51.36247.0' $staleNow.AddDays(-271) $staleNow 270) -like 'vc14-x64 14.51.36247.0 was signed 2026-01-07, 271 days ago*') $true 'An unchanged permanent link is reported with its version and age'
+Assert-Throws { Get-SignatureTime "$PSScriptRoot/Common.ps1" } 'A file without an embedded signature has no signing time'
+if ($PSVersionTable.PSEdition -eq 'Core' -and $IsWindows) {
+    $signed = Get-SignatureTime (Get-Process -Id $PID).Path
+    Assert-Equal ($signed -gt [datetime]'2020-01-01' -and $signed -lt [DateTime]::UtcNow) $true 'Read the signing time of a real Microsoft executable'
+}
+
 Assert-Equal (Get-PackageAction ([version]'14.51.1') $null 'install' $false) 'install' 'missing runtime'
 Assert-Equal (Get-PackageAction ([version]'14.51.1') ([version]'14.44.1') 'install' $false) 'install' 'older runtime'
 foreach ($mode in @('install', 'update', 'repair')) {

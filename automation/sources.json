@@ -12,12 +12,14 @@
     {
       "id": "vc14-x86",
       "url": "https://aka.ms/vc14/vc_redist.x86.exe",
-      "minimumVersion": "14.51.36247.0"
+      "minimumVersion": "14.51.36247.0",
+      "staleAfterDays": 270
     },
     {
       "id": "vc14-x64",
       "url": "https://aka.ms/vc14/vc_redist.x64.exe",
-      "minimumVersion": "14.51.36247.0"
+      "minimumVersion": "14.51.36247.0",
+      "staleAfterDays": 270
     },
     {
       "id": "vstor",

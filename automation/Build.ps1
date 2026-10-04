@@ -56,6 +56,15 @@ function Receive-Source($Source, [switch] $Legacy) {
 foreach ($source in $catalog.current) { Receive-Source $source }
 $vc14 = @($sources | Where-Object { $_.id -like 'vc14-*' } | ForEach-Object { $_.version } | Select-Object -Unique)
 if ($vc14.Count -ne 1) { throw "Microsoft serves different VC++ v14 versions for x86 and x64: $($vc14 -join ', ')" }
+# Reported by a separate job: the package is still built from what is served.
+$stale = @(foreach ($source in $catalog.current | Where-Object { $_['staleAfterDays'] }) {
+    $version = ($sources | Where-Object { $_.id -eq $source.id }).version
+    Get-StaleSourceMessage $source.id $version (Get-SignatureTime (Join-Path $downloads "$($source.id).exe")) ([DateTime]::UtcNow) $source.staleAfterDays
+})
+if ($stale.Count) {
+    Write-Host "::warning::$($stale -join ' ')"
+    if ($env:GITHUB_OUTPUT) { Add-Content $env:GITHUB_OUTPUT "stale=$($stale -join ' ')" }
+}
 foreach ($source in $catalog.legacyMonitors) { Receive-Source $source -Legacy }
 
 $indexPath = Join-Path $downloads 'dotnet-index.json'
