@@ -174,7 +174,7 @@ function Assert-LegacyUpgrade($State) {
         if ($engine.ProductState($package.productCode) -eq 5) { throw "Ordinary removal is still blocked: $($package.id)" }
     }
     Invoke-TestProcess 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$payload\Install.ps1`" -Components vc2013 -Quiet"
-    Write-Host 'PASS: VC2013 12.0.30501 upgraded, its obsolete Microsoft record removed, ordinary removal and reinstallation work'
+    Write-Host 'PASS: VC2013 from the 12.0.30501 bundle upgraded, its obsolete Microsoft record removed, ordinary removal and reinstallation work'
 }
 
 function Test-RealOlderOffer($State) {
