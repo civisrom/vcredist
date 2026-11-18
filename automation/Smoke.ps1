@@ -93,6 +93,10 @@ function Register-TestSdk {
     $null = Save-Download $file[0].url $path -Microsoft
     if ((Get-FileHash $path -Algorithm SHA512).Hash -ne $file[0].hash) { throw 'SDK SHA512 mismatch.' }
     Assert-MicrosoftSignature $path
+    # The image may already hold this SDK from its ZIP. There data\apphost-templates.cat
+    # is a file, while the MSI makes a directory of that name (Error 1312).
+    $catalog = "$env:ProgramFiles\dotnet\packs\Microsoft.NETCore.App.Host.win-x64\$($sdk.'runtime-version')\data\apphost-templates.cat"
+    if (Test-Path -LiteralPath $catalog -PathType Leaf) { Remove-Item -LiteralPath $catalog }
     Invoke-TestProcess $path "/install /quiet /norestart /log `"$work\baseline-sdk.log`"" 900
     Invoke-Checked "$env:ProgramFiles\dotnet\dotnet.exe" @('--list-sdks')
     Write-Host "PASS: registered SDK $($sdk.version) for shared-component ownership tests"

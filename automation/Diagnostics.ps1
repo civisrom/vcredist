@@ -4,7 +4,7 @@ foreach ($root in $roots) {
     if (-not (Test-Path $root)) { continue }
     Get-ChildItem $root -Filter '*.log' -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 6 | ForEach-Object {
         Write-Host "--- $($_.Name) ---"
-        Select-String -LiteralPath $_.FullName -Pattern 'Found dependent|Disallow|WixDependencyCheck|Return value 3|error 0x|Will not uninstall|REINSTALL|PackageCode|Packagecode|Component: C_CENTRAL_|File: .*100.*dll' |
+        Select-String -LiteralPath $_.FullName -Pattern 'Error \d{4}\.|Found dependent|Disallow|WixDependencyCheck|Return value 3|error 0x|Will not uninstall|REINSTALL|PackageCode|Packagecode|Component: C_CENTRAL_|File: .*100.*dll' |
             Select-Object -Last 20 | ForEach-Object { Write-Host $_.Line }
         Get-Content $_.FullName -Tail 35 | Write-Host
     }
